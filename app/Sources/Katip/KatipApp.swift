@@ -29,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //   Katip.app/Contents/MacOS/Katip --selftest ses.wav
         if let i = CommandLine.arguments.firstIndex(of: "--fix") {
             let input = CommandLine.arguments.dropFirst(i + 1).joined(separator: " ")
-            print(Replacements.apply(to: input))
+            print(Snippets.apply(to: Replacements.apply(to: input)))
             exit(0)
         }
 
@@ -192,6 +192,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         replacements.target = self
         menu.addItem(replacements)
 
+        let snippets = NSMenuItem(title: "Metin kısayollarını düzenle…",
+                                  action: #selector(openSnippets), keyEquivalent: "")
+        snippets.target = self
+        menu.addItem(snippets)
+
         menu.addItem(.separator())
 
         let accessibility = NSMenuItem(
@@ -279,6 +284,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openReplacements() {
         _ = Replacements.load()
         NSWorkspace.shared.open(Replacements.fileURL)
+    }
+
+    @objc private func openSnippets() {
+        _ = Snippets.load()
+        NSWorkspace.shared.open(Snippets.fileURL)
     }
 
     @objc private func fixInputMonitoring() {
@@ -381,6 +391,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let transcriber = Transcriber()
                 var clock = Date()
                 try await transcriber.load(model: model, useGlossary: useGlossary)
+                if let li = args.firstIndex(of: "--lang"), let lang = args.dropFirst(li + 1).first {
+                    await transcriber.setLanguage(lang == "auto" ? nil : lang)
+                    print("• dil: \(lang)")
+                }
                 print("  hazır (\(String(format: "%.1f", Date().timeIntervalSince(clock))) sn)")
 
                 // Üç kez: ilk tur ısınmayı içerir, asıl önemli olan sürekli hâl.

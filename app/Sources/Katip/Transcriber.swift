@@ -10,6 +10,8 @@ actor Transcriber {
     private var pipe: WhisperKit?
     private var promptTokens: [Int]?
     private var useGlossary = true
+    /// Ölçüm için geçici dil değiştirme.
+    var languageOverride: String?
 
     var isReady: Bool { pipe != nil }
 
@@ -64,6 +66,7 @@ actor Transcriber {
         // kullanıcı her hâlükârda düzenleyebilmeli.
         _ = Glossary.load()
         _ = Replacements.load()
+        _ = Snippets.load()
         buildPromptTokens()
 
         await warmUp()
@@ -92,6 +95,8 @@ actor Transcriber {
         Trace.log("ısınma \(String(format: "%.1f", Date().timeIntervalSince(started))) sn")
     }
 
+    func setLanguage(_ lang: String?) { languageOverride = lang }
+
     func transcribe(_ samples: [Float]) async throws -> String {
         guard let pipe else { throw TranscriberError.notLoaded }
         // Tokenizer yükleme anında hazır olmayabiliyor; ilk katipde tekrar dene.
@@ -102,7 +107,7 @@ actor Transcriber {
             task: .transcribe,
             // Dil SABİT. Otomatik algılama bu projede düşman: İngilizce terimle
             // başlayan bir Türkçe cümlede pencereyi `en` sanıp ekleri bozuyor.
-            language: "tr",
+            language: languageOverride ?? "tr",
             temperature: 0,
             usePrefillPrompt: true,
             detectLanguage: false,
@@ -146,7 +151,9 @@ actor Transcriber {
     private static func clean(_ text: String) -> String {
         var out = text.trimmingCharacters(in: .whitespacesAndNewlines)
         out = out.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-        return Replacements.apply(to: out)
+        // Sıra önemli: önce yanlış duyulanı düzelt, sonra kısayolu genişlet.
+        // Tersi olsaydı yanlış duyulmuş bir tetikleyici hiç eşleşmezdi.
+        return Snippets.apply(to: Replacements.apply(to: out))
     }
 
     enum TranscriberError: LocalizedError {

@@ -186,6 +186,29 @@ siliniyor, dosya yeniden yazılıyor. Ayrıca en fazla 1000 kayıt tutuluyor.
 
 Süreyi değiştirmek için `History.retentionDays`.
 
+## Metin kısayolları
+
+Söylediğin kısa bir ifade, hazır bir metin bloğuna genişler. Vibe coding'de
+tekrar tekrar söylediğin kalıplar için — proje bağlamı, kodlama kuralların,
+standart prompt önekleri.
+
+Sağ tık → **Metin kısayollarını düzenle…**
+
+```
+standart bağlam = Proje: Next.js 16 + TypeScript. Türkçe açıkla, kod bloğu ver.
+inceleme isteği = Bu değişikliği gözden geçir:\n- hata\n- sadeleştirme
+```
+
+`\n` ile çok satırlı blok yazılır. Varsayılan dosyada **aktif kural yoktur**,
+sadece yorumlu örnekler — beklenmedik bir tetikleyicinin konuşma ortasında
+ateşlenmesi, kaçırılan bir terimden çok daha rahatsız edicidir.
+
+> Tetikleyiciyi ayırt edici seç. "prompt" gibi tek ve yaygın bir kelime normal
+> konuşmanın ortasında ateşlenir; iki kelimeli ifadeler iyi çalışır.
+
+Sıra: önce **düzeltme**, sonra **genişletme** — tetikleyici yanlış duyulduysa
+önce düzelsin, sonra eşleşsin.
+
 ## Girişte başlat
 
 Sağ tık → **Girişte başlat**. `SMAppService` kullanıyor (macOS 13+); eski
@@ -200,6 +223,7 @@ LaunchAgent plist yazma yöntemine gerek yok. macOS onay isterse menüde
 |---|---|
 | `glossary.txt` | Whisper'a terim ipucu. **Bütçe 111 token**, aşarsa BAŞTAKİLER düşer → kritik terimleri sona yaz. |
 | `replacements.txt` | `yanlış = doğru` kural tablosu. Sözlüğün kurtaramadığı yerde devreye girer. |
+| `snippets.txt` | `tetikleyici = uzun metin` kısayolları. Varsayılanda aktif kural yok. |
 | `katip.log` | Ne olduğunu gösterir (model, sözlük token sayısı, hatalar). |
 
 Değişiklikten sonra uygulamayı yeniden başlat.

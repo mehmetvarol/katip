@@ -67,6 +67,7 @@ enum Glossary {
         # Değişiklik için uygulamayı yeniden başlat.
 
         \(defaultTerms.joined(separator: ", "))
+
         """
     }
 }
@@ -145,6 +146,7 @@ enum Replacements {
     # --- diğer ---
     Hawk = hook
     refaktör = refactor
+
     """
 }
 
