@@ -31,6 +31,11 @@ final class History {
     /// birkaç yüz KB eder.
     private static let limit = 1000
 
+    /// Saklama süresi. Bundan eski kayıtlar açılışta ve her yazımda silinir.
+    /// Gerekçe gizlilik: konuşulan her şey düz metin duruyor, süresiz birikmemeli.
+    static let retentionDays = 30
+    private static var retention: TimeInterval { Double(retentionDays) * 24 * 3600 }
+
     private(set) var entries: [HistoryEntry] = []
     var onChange: (() -> Void)?
 
@@ -42,7 +47,13 @@ final class History {
         let entry = HistoryEntry(text: text, app: app, seconds: seconds)
         entries.insert(entry, at: 0)
         if entries.count > Self.limit { entries.removeLast(entries.count - Self.limit) }
-        append(entry)
+
+        // Süresi dolmuş kayıt varsa dosyayı baştan yaz, yoksa sadece ekle.
+        if prune() {
+            rewrite()
+        } else {
+            append(entry)
+        }
         onChange?()
     }
 
@@ -63,6 +74,19 @@ final class History {
         Trace.log("geçmiş temizlendi")
     }
 
+    /// Süresi dolmuş kayıtları bellekten düşür. Bir şey silindiyse `true` döner.
+    @discardableResult
+    private func prune() -> Bool {
+        let cutoff = Date().addingTimeInterval(-Self.retention)
+        let before = entries.count
+        entries.removeAll { $0.date < cutoff }
+        let removed = before - entries.count
+        if removed > 0 {
+            Trace.log("geçmiş: \(removed) kayıt \(Self.retentionDays) günden eski, silindi")
+        }
+        return removed > 0
+    }
+
     // MARK: - Kalıcılık
 
     private func load() {
@@ -74,6 +98,20 @@ final class History {
             return try? decoder.decode(HistoryEntry.self, from: data)
         }.reversed()
         if entries.count > Self.limit { entries.removeLast(entries.count - Self.limit) }
+        if prune() { rewrite() }
+    }
+
+    /// Dosyayı bellekteki hâlden yeniden üret. `entries` en yeni önce tutuluyor,
+    /// dosya ise eskiden yeniye — bu yüzden ters çevriliyor.
+    private func rewrite() {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let lines = entries.reversed().compactMap { entry -> String? in
+            guard let data = try? encoder.encode(entry) else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+        let body = lines.isEmpty ? "" : lines.joined(separator: "\n") + "\n"
+        try? body.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 
     private func append(_ entry: HistoryEntry) {

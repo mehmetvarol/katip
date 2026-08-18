@@ -167,12 +167,17 @@ Sağ tık → **Geçmiş…** (veya `H`). Aranabilir liste: her kayıtta metin, 
 önce, hangi uygulamaya yazıldığı ve kaç saniyelik konuşma olduğu görünür.
 Tıklayınca kopyalanır.
 
-Arama Türkçe'ye duyarlı (`i/İ` ve aksan farkları eşleşir). Son **1000** kayıt
-tutulur.
+Arama Türkçe'ye duyarlı (`i/İ` ve aksan farkları eşleşir).
+
+**Saklama: 30 gün.** Daha eski kayıtlar açılışta ve her yeni diktede otomatik
+siliniyor, dosya yeniden yazılıyor. Ayrıca en fazla 1000 kayıt tutuluyor.
 
 > ⚠️ Konuştuğun her şey `~/Library/Application Support/Katip/history.jsonl`
-> içinde **düz metin** olarak durur. Menüdeki "Geçmişi temizle" ile silinir.
-> JSON Lines olduğu için `grep`'lenebilir de.
+> içinde **düz metin** olarak durur. 30 gün otomatik temizlik gizlilik için var
+> ama yeterli değil: şifre veya mahrem bir şey dikte edersen menüdeki
+> "Geçmişi temizle" ile hemen sil. JSON Lines olduğu için `grep`'lenebilir de.
+
+Süreyi değiştirmek için `History.retentionDays`.
 
 ## Girişte başlat
 

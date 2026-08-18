@@ -39,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--historyprobe") {
             History.shared.add(text: "şu component'i refactor edelim", app: "Cursor", seconds: 2.4)
             History.shared.add(text: "Zustand store'una persist ekle", app: "Terminal", seconds: 3.1)
-            print("kayıt sayısı: \(History.shared.entries.count)")
+            print("saklama: \(History.retentionDays) gün · kayıt sayısı: \(History.shared.entries.count)")
             print("arama 'zustand': \(History.shared.search("zustand").count) sonuç")
             print("arama 'ZUSTAND': \(History.shared.search("ZUSTAND").count) sonuç (buyuk/kucuk)")
             print("arama 'yok': \(History.shared.search("yok").count) sonuç")
