@@ -148,9 +148,29 @@ actor Transcriber {
         promptTokens = tokens
     }
 
+    /// Bilinen Whisper Türkçe halüsinasyon kalıpları — sessizlik/gürültü
+    /// üzerine üretilen sahte altyazı kredisi ("Altyazı M.K." tipi). Harf
+    /// dışındaki her şeyi (nokta, boşluk, büyük/küçük harf) atıp KANONİK
+    /// biçimde karşılaştırıyoruz, yoksa "Altyazı M.K" / "altyazı m.k." gibi
+    /// varyasyonlar kaçar.
+    ///
+    /// Parça zaten VAD tarafından AYRI çevrildiği için (bkz. akan metin),
+    /// segmentin TAMAMI bu kalıba denk gelirse gerçek konuşmayla karışmadan
+    /// güvenle atılabilir — `deliver()` zaten boş metni görmezden geliyor.
+    private static let hallucinations: Set<String> = ["altyazımk"]
+
+    private static func canonicalForHallucinationCheck(_ text: String) -> String {
+        text.lowercased(with: Locale(identifier: "tr_TR"))
+            .unicodeScalars.filter { CharacterSet.letters.contains($0) }
+            .map(String.init).joined()
+    }
+
     private static func clean(_ text: String) -> String {
         var out = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !hallucinations.contains(canonicalForHallucinationCheck(out)) else { return "" }
+
         out = out.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        out = FillerWords.strip(from: out)
         // Sıra önemli: önce yanlış duyulanı düzelt, sonra kısayolu genişlet.
         // Tersi olsaydı yanlış duyulmuş bir tetikleyici hiç eşleşmezdi.
         return Snippets.apply(to: Replacements.apply(to: out))
