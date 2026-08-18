@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var spinner: NSProgressIndicator?
     private var smoothedLevel: Float = 0
     private var hud: HUDPanel?
+    private var wasShown = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Öz-test: mikrofon/tıklama gerektirmeden ASR hattını doğrular.
@@ -168,6 +169,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hudItem.target = self
         hudItem.state = HUDPanel.isEnabled ? .on : .off
         menu.addItem(hudItem)
+
+        // Kapalı biçim bilerek neredeyse görünmez; kaybolduğunda geri çağıracak
+        // bir yol olmalı.
+        let findItem = NSMenuItem(title: "Kartı ekranın ortasına al",
+                                  action: #selector(recenterHUD), keyEquivalent: "")
+        findItem.target = self
+        findItem.isEnabled = HUDPanel.isEnabled
+        menu.addItem(findItem)
         menu.addItem(.separator())
 
         let hotkeyItem = NSMenuItem(title: "Kısayol tuşu", action: nil, keyEquivalent: "")
@@ -256,6 +265,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSPasteboard.general.setString(controller.lastTranscript, forType: .string)
     }
 
+    @objc private func recenterHUD() {
+        if hud == nil { HUDPanel.isEnabled = true }
+        showHUD()
+        hud?.recenter()
+    }
+
     @objc private func toggleHUD() {
         HUDPanel.isEnabled.toggle()
         if HUDPanel.isEnabled { showHUD() } else { hideHUD() }
@@ -267,8 +282,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.onAction = { [weak self] action in self?.handle(action) }
             hud = panel
         }
+        let firstTime = !wasShown
+        wasShown = true
         hud?.show()
         hud?.update(state: controller.state, level: 0)
+        if firstTime { hud?.peek() }   // kapalı biçim çok sönük — nerede olduğunu göster
         startAnimation()   // boştayken de yaşasın (dalgalar sönümlensin)
     }
 

@@ -102,16 +102,55 @@ final class HUDPanel: NSPanel {
         }
     }
 
+    private var exitCheck: Task<Void, Never>?
+
+    /// AppKit, pencere boyutu her değiştiğinde tracking area'yı yeniden kuruyor ve
+    /// bu **sahte `mouseExited`** üretiyor. Naif bağlarsak kart titriyor:
+    /// açılıyor → sahte çıkış → kapanıyor → giriş → açılıyor. Bu yüzden çıkışa
+    /// hemen inanmıyoruz; kısa bir gecikmeden sonra **gerçek fare konumuna**
+    /// bakıp doğruluyoruz.
     private func hoverChanged(_ inside: Bool) {
-        hovering = inside
+        exitCheck?.cancel()
+        if inside {
+            hovering = true
+            applyHover()
+            return
+        }
+        exitCheck = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(220))
+            guard !Task.isCancelled, let self, !self.pointerInside else { return }
+            self.hovering = false
+            self.applyHover()
+        }
+    }
+
+    /// Fare gerçekten kartın üstünde mi? Ekran koordinatlarında sorulur —
+    /// tracking area'nın ne dediğinden bağımsız tek doğru kaynak.
+    private var pointerInside: Bool { frame.contains(NSEvent.mouseLocation) }
+
+    private func applyHover() {
         guard pinnedMode == nil else { return }
         switch mode {
         case .listening: return                      // kayıt sürerken karışma
-        default: setMode(inside ? .expanded : .collapsed)
+        default: setMode(hovering ? .expanded : .collapsed)
+        }
+    }
+
+    /// Sürüklerken biçim değişmemeli: her biçim değişimi `setFrame` çağırıyor ve
+    /// bu, kullanıcının taşıdığı pencereyi geri konumlandırıp sürüklemeyi
+    /// imkânsız kılıyor.
+    private(set) var dragging = false
+
+    func setDragging(_ on: Bool) {
+        dragging = on
+        if !on {
+            hovering = pointerInside
+            applyHover()
         }
     }
 
     private func setMode(_ new: Mode) {
+        guard !dragging else { return }
         switch new {
         case .result, .notice: pinnedMode = new
         default: pinnedMode = nil
@@ -195,6 +234,27 @@ final class HUDPanel: NSPanel {
         super.mouseUp(with: event)
         snapToNearestEdge()
         savePosition()
+    }
+
+    /// Kart kaybolduysa (ekran değişti, kenara sıkıştı) geri çağır.
+    func recenter() {
+        guard let visible = NSScreen.main?.visibleFrame else { return }
+        setFrameOrigin(NSPoint(x: visible.midX - frame.width / 2, y: visible.minY + 64))
+        savePosition()
+        peek()
+    }
+
+    /// Kapalı biçim bilerek neredeyse görünmez — ilk açılışta kısa süre açık
+    /// dur ki kullanıcı nerede olduğunu görsün.
+    func peek() {
+        hovering = true
+        applyHover()
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.8))
+            guard let self, !self.pointerInside else { return }
+            self.hovering = false
+            self.applyHover()
+        }
     }
 
     /// Geliştirme yardımcısı: bir biçimi PNG'ye render eder.
@@ -312,11 +372,15 @@ private final class CardView: NSView {
     // tıklama sayılamaz.
     override func mouseDown(with event: NSEvent) {
         dragOrigin = window?.frame.origin
+        (window as? HUDPanel)?.setDragging(true)
         super.mouseDown(with: event)
     }
 
     override func mouseUp(with event: NSEvent) {
-        defer { super.mouseUp(with: event) }
+        defer {
+            (window as? HUDPanel)?.setDragging(false)
+            super.mouseUp(with: event)
+        }
         guard let start = dragOrigin, let now = window?.frame.origin,
               hypot(now.x - start.x, now.y - start.y) < 4 else { return }
 
@@ -443,7 +507,7 @@ private final class CardView: NSView {
         switch mode {
         case .collapsed:
             fillSurface(bounds, radius: bounds.height / 2)
-            Self.control.setFill()
+            NSColor(white: 1.0, alpha: 0.28).setFill()
             NSBezierPath(roundedRect: l.line, xRadius: 3, yRadius: 3).fill()
 
         case .expanded:
