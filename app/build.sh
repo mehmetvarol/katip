@@ -15,7 +15,12 @@ DEST="${KATIP_DEST:-/Applications}"
 APP="$DEST/$APP_NAME.app"
 
 echo "▶ Derleniyor (release)…"
-swift build -c release
+# --disable-sandbox: SwiftPM, Package.swift'i derlerken KENDİ sandbox-exec'ini
+# çağırıyor. Bu script Homebrew'un install adımı gibi ZATEN sandbox'lanmış bir
+# ortamdan çalıştırılırsa iç içe sandbox_apply çağrısı "Operation not permitted"
+# ile patlıyor (brew tap testinde yakalandı). Package.swift kendi dosyamız ve
+# hiç plugin/exec kullanmıyor — bu sandbox'ı kapatmak risksiz.
+swift build -c release --disable-sandbox
 
 BIN=".build/release/$APP_NAME"
 [ -x "$BIN" ] || { echo "✗ Binary bulunamadı: $BIN"; exit 1; }
