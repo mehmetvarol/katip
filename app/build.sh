@@ -46,8 +46,15 @@ done
 # İmza KİMLİĞİ önemli: TCC izinleri (mikrofon/erişilebilirlik) imzaya bağlanıyor.
 # Ad-hoc imza her derlemede değişir → verilen izinler her seferinde düşer.
 # Sabit bir geliştirici kimliğiyle imzalayınca izinler derlemeler arası korunur.
+#
+# `|| true` KRİTİK: kişisel bir "Apple Development" kimliği olmayan HERKESTE
+# (yani gerçek dünyadaki çoğu kullanıcıda) grep eşleşme bulamayıp exit 1 verir.
+# `pipefail` + `set -e` bunu üç aşamalı boru hattının genel hatası sayıp
+# betiği İMZALAMADAN, HİÇBİR HATA YAZMADAN burada sessizce öldürüyordu — bu
+# hatayı Homebrew paketlemesini test ederken yakaladık, ama kendi kimliğimiz
+# olmayan HER doğrudan `./build.sh` kullanıcısını da vuruyordu.
 SIGN_ID="${KATIP_SIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null \
-    | grep -m1 "Apple Development" | awk -F'"' '{print $2}')}"
+    | grep -m1 "Apple Development" | awk -F'"' '{print $2}' || true)}"
 
 if [ -n "$SIGN_ID" ]; then
     echo "▶ İmzalanıyor: $SIGN_ID"
