@@ -30,19 +30,24 @@ karışık dil durumu için Whisper tabanlı bir motor kullanıyor.
 ## Kurulum
 
 Katip **notarize edilmiş bir binary dağıtmıyor** — Apple Developer Program
-üyeliği (99 $/yıl) gerektirmeden açık kaynak kalmak için kaynaktan derleniyor.
+üyeliği (99 $/yıl) gerektirmeden açık kaynak kalmak için.
+
+**İndir (en basit):**
+[Katip.zip'i indir](https://github.com/mehmetvarol/katip/releases/latest) →
+çıkar → `Katip.app`'i Uygulamalar klasörüne sürükle.
 
 **Homebrew ile:**
 ```bash
 brew install --HEAD mehmetvarol/katip/katip
+rm -rf /Applications/Katip.app && cp -R "$(brew --prefix katip)/Katip.app" /Applications/Katip.app
 ```
 
-**Doğrudan:**
+**Doğrudan (kaynaktan):**
 ```bash
 git clone https://github.com/mehmetvarol/katip.git && cd katip/app && ./build.sh --run
 ```
 
-İkisi de **ad-hoc imzalar** (kimliksiz) — yani her güncellemede Mikrofon,
+Üçü de **ad-hoc imzalar** (kimliksiz) — yani her güncellemede Mikrofon,
 Erişilebilirlik ve Giriş İzleme izinlerini yeniden vermen gerekir.
 
 > [!warning] İlk çalıştırmada Gatekeeper engelleyecek
