@@ -42,7 +42,8 @@ pratikte tek makul seçenek.
 | **Adım 2** — atanabilir kısayol (bas-tut + çift-bas-kilit) | ✅ **çalışıyor** |
 | **Adım 3** — yüzen kart (canlı ses dalgaları) | ✅ **çalışıyor** |
 | **Adım 4** — VAD parçalama (kilit modunda akan metin) | ✅ **çalışıyor** |
-| Adım 5 — geçmiş, uygulama-bazlı kurallar, girişte başlat | ⬜ |
+| **Adım 5** — geçmiş + girişte başlat | ✅ **çalışıyor** |
+| Adım 6 — uygulama-bazlı kurallar, notarization | ⬜ |
 | P0 — kalite tezgâhı (faster-whisper, Python) | 🅿️ rafta (`p0-bench/`) |
 
 ## Kurulum
@@ -159,6 +160,25 @@ doğrulanabiliyor.
 
 > Son cümleden sonra yeterli sessizlik yoksa o parça **artık** olarak bekler ve
 > kilit modunu bitirdiğinde gönderilir. Kayıp yok.
+
+## Geçmiş
+
+Sağ tık → **Geçmiş…** (veya `H`). Aranabilir liste: her kayıtta metin, ne kadar
+önce, hangi uygulamaya yazıldığı ve kaç saniyelik konuşma olduğu görünür.
+Tıklayınca kopyalanır.
+
+Arama Türkçe'ye duyarlı (`i/İ` ve aksan farkları eşleşir). Son **1000** kayıt
+tutulur.
+
+> ⚠️ Konuştuğun her şey `~/Library/Application Support/Katip/history.jsonl`
+> içinde **düz metin** olarak durur. Menüdeki "Geçmişi temizle" ile silinir.
+> JSON Lines olduğu için `grep`'lenebilir de.
+
+## Girişte başlat
+
+Sağ tık → **Girişte başlat**. `SMAppService` kullanıyor (macOS 13+); eski
+LaunchAgent plist yazma yöntemine gerek yok. macOS onay isterse menüde
+"(Ayarlar'dan onayla)" yazar → Sistem Ayarları > Genel > Giriş Öğeleri.
 
 ## Ayarlar (düz metin dosyaları)
 

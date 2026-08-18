@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import ServiceManagement
 import SwiftUI
 
 @main
@@ -26,6 +27,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Öz-test: mikrofon/tıklama gerektirmeden ASR hattını doğrular.
         //   Katip.app/Contents/MacOS/Katip --selftest ses.wav
+        if CommandLine.arguments.contains("--loginprobe") {
+            print("baslangic durum: \(SMAppService.mainApp.status.rawValue) (0=notRegistered 1=enabled 2=requiresApproval 3=notFound)")
+            let ok = LoginItem.toggle()
+            print("toggle sonuc: \(ok) · yeni durum: \(SMAppService.mainApp.status.rawValue) · isEnabled=\(LoginItem.isEnabled)")
+            _ = LoginItem.toggle()   // eski hale dondur
+            print("geri alindi · durum: \(SMAppService.mainApp.status.rawValue)")
+            exit(0)
+        }
+
+        if CommandLine.arguments.contains("--historyprobe") {
+            History.shared.add(text: "şu component'i refactor edelim", app: "Cursor", seconds: 2.4)
+            History.shared.add(text: "Zustand store'una persist ekle", app: "Terminal", seconds: 3.1)
+            print("kayıt sayısı: \(History.shared.entries.count)")
+            print("arama 'zustand': \(History.shared.search("zustand").count) sonuç")
+            print("arama 'ZUSTAND': \(History.shared.search("ZUSTAND").count) sonuç (buyuk/kucuk)")
+            print("arama 'yok': \(History.shared.search("yok").count) sonuç")
+            exit(0)
+        }
+
         if let index = CommandLine.arguments.firstIndex(of: "--vadtest") {
             runVADTest(path: CommandLine.arguments.dropFirst(index + 1).first)
             return
@@ -110,6 +130,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
 
+        let history = NSMenuItem(title: "Geçmiş…", action: #selector(showHistory),
+                                 keyEquivalent: "h")
+        history.target = self
+        menu.addItem(history)
+        menu.addItem(.separator())
+
+        let login = NSMenuItem(title: LoginItem.needsApproval
+                               ? "Girişte başlat (Ayarlar'dan onayla)"
+                               : "Girişte başlat",
+                               action: #selector(toggleLoginItem), keyEquivalent: "")
+        login.target = self
+        login.state = LoginItem.isEnabled ? .on : .off
+        menu.addItem(login)
+
         let hudItem = NSMenuItem(title: "Yüzen kart", action: #selector(toggleHUD),
                                  keyEquivalent: "")
         hudItem.target = self
@@ -176,6 +210,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil  // menü kalıcı olmasın, sol tık yine doğrudan kayıt açsın
+    }
+
+    @objc private func showHistory() {
+        HistoryWindowController.shared.show()
+    }
+
+    @objc private func toggleLoginItem() {
+        if !LoginItem.toggle() {
+            flash("Girişte başlat ayarlanamadı — Sistem Ayarları > Genel > Giriş Öğeleri")
+        }
     }
 
     @objc private func copyLast() {

@@ -171,8 +171,12 @@ final class DictationController {
             guard !text.isEmpty else { return }
 
             lastTranscript = text
+            let target = FocusTracker.shared.previousApp?.localizedName
             try await TextInjector.inject(text)
             Trace.log("metin yazıldı ✔")
+            History.shared.add(text: text, app: target,
+                               seconds: Double(samples.count) / AudioRecorder.sampleRate)
+            NotificationCenter.default.post(name: .katipHistoryChanged, object: nil)
         } catch {
             if !lastTranscript.isEmpty {
                 NSPasteboard.general.clearContents()

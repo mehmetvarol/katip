@@ -1,0 +1,14 @@
+# Rakip kıyası — bu 8 cümleyi her uygulamaya AYNI şekilde söyle.
+# İngilizce terimler `backtick` içinde: hem referans metin hem beklenen terim
+# listesi bundan türetiliyor. Backtick'leri okuma, normal konuş.
+#
+# Sıra önemli — çıktıları da aynı sırada yapıştıracaksın.
+
+şu `component`'i biraz `refactor` edelim çok şişti
+`Zustand` `store`'una `persist` ekle `localStorage`'da kalsın
+`TanStack Query`'de `stale time`'ı artıralım gereksiz yere `refetch` oluyor
+`Netlify`'a `deploy` etmeden önce yerelde bir `build` alalım
+`Next.js` `App Router`'da `Turbopack` ile `build` patlıyor `dependency` çakışması olabilir
+`React Native` tarafında `SSE` bağlantısı arka planda kopuyor `exponential backoff` ile `reconnect` kuralım
+şuna bir bakar mısın `chart`'ta `data` çoğalınca `render` süresi uzuyor bunu `virtualize` edelim bir de `loading state` için `skeleton` koyalım
+`migration`'ı `production`'da çalıştırmadan önce `backup` alalım `environment variable`'ları güncellemeyi de unutma
