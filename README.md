@@ -314,9 +314,8 @@ yakın ama tam eşleşmeyen ifadeler bulursa `yanlış = doğru` kuralı **öner
 > Kurallar **otomatik uygulanmaz.** Yanlış bir kural, kaçırılan bir terimden
 > daha kötüdür — son söz sende.
 
-Neden bu özellik: kıyas testi Katip'in Wispr Flow'a karşı tek gerçek üstünlüğünün
-**kişiselleştirme** olduğunu gösterdi (%71 → %84). Ama elle kural yazmak
-sürtünmeli; bu, o katmanı ölçekliyor. Wispr bunu yapamaz — senin özel repolarını
+Neden bu özellik: elle kural yazmak sürtünmeli, bu o katmanı ölçekliyor. Bulut
+tabanlı bir araç bunu **yapısal olarak** yapamaz — senin özel repolarını
 göremez.
 
 ## Girişte başlat
