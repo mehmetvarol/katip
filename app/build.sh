@@ -61,13 +61,13 @@ cat <<'EOF'
     1. Mikrofon izni sorulacak → İzin Ver.
     2. Erişilebilirlik izni ELLE verilmeli (metnin imlece yazılması için):
        menü çubuğu ikonuna SAĞ TIK → "Erişilebilirlik izni ver…"
-       İzni verkatipn sonra UYGULAMAYI YENİDEN BAŞLAT.
+       İzni verdikten sonra UYGULAMAYI YENİDEN BAŞLAT.
     3. İlk açılışta model indirilir (~600 MB–1.5 GB). İkon ⬇︎ gösterirken bekle.
 
 ℹ️  İzin sorunu yaşarsan (Ayarlar'da açık görünüyor ama çalışmıyor):
       tccutil reset Accessibility dev.mvrl.katip
     sonra uygulamayı yeniden başlat ve izni tekrar ver.
-    NOT: erişilebilirlik durumu SÜREÇ BAŞINA önbelleklenir — izni verkatipn
+    NOT: erişilebilirlik durumu SÜREÇ BAŞINA önbelleklenir — izni verdikten
     sonra uygulamayı mutlaka kapatıp yeniden aç.
 EOF
 

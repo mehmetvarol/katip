@@ -29,7 +29,7 @@ bu makinede ölçülerek doğrulandı. Türkçe+İngilizce karışık dikte içi
 pratikte tek makul seçenek.
 
 - 🎤 Menü çubuğu ikonu · atanabilir global kısayol · bas-tut ve çift-bas-kilit
-- 〰️ Masaüstünde yüzen kapsül: canlı ses dalgası, kenara yapışma, açık/koyu tema
+- 〰️ Masaüstünde yüzen kart: fareyle açılan düğmeler, canlı ses dalgası, kenara yapışma
 - 🔒 Kilit modunda **akan metin** — cümle aralarından bölüp yazar
 - 📴 Bulut yok, abonelik yok, ses cihazdan çıkmıyor
 - ⚡ ~1.75 sn / dikte (M1 Pro, Metal)
@@ -71,31 +71,57 @@ Fn/🌐 listede yok: macOS'un kendi katip kısayolu onu sistem seviyesinde kapı
 Kayıt ilk basışta **hemen** başlar; bas-tut ile çift-bas ayrımı bırakışta yapılır
 (250 ms / 400 ms eşikleri) — beklemek ilk hecenin kaybı olurdu.
 
-**Yüzen kapsül:** masaüstünde duran, sürüklenebilir bir gösterge (Wispr Flow'un
-"Flow Bar"ı gibi). **Boştayken dar (84×32), konuşurken genişler (148×32)** —
-merkezi sabit tutup iki yana açılıyor.
+**Yüzen kart:** masaüstünde duran, sürüklenebilir bir gösterge. Tek bir "ada"
+gibi davranır — **yer değiştirmez, şekil değiştirir.** Beş biçim var:
 
-İçinde solda **durum ikonu**, sağda **ses dalgası** var:
-
-| Durum | İkon | Renk |
+| Biçim | Ne zaman | Ne var içinde |
 |---|---|---|
-| Model yükleniyor | ⬇︎ | soluk gri |
-| Hazır | 🎤 | ikincil gri |
-| Kayıt | 🎤 | kırmızı |
-| Kilit modu | 🔒 | turuncu |
-| Çeviri | 〰️ | mavi (ilerleyen dalga) |
-| Hata | ⚠️ | sarı |
+| **collapsed** (78×26) | boşta | ince bir çizgi; neredeyse görünmez |
+| **expanded** (176×96) | fare üstüne gelince | kısayol etiketi + üç yuvarlak düğme |
+| **listening** (176×44) | konuşurken | ✕ · ses dalgası · ✓ |
+| **notice** (otomatik en) | uyarı | ⚠︎ + mesaj + ✕ |
+| **result** (344×180) | metin yazılamadıysa | dikte metni + **Kopyala** |
 
-**Kenara yapışma:** kapsülü bir kenara 140 px'den yakın bırakırsan o kenara
+`expanded` biçimindeki üç düğme:
+
+- 🌐 **dil** — `TR → EN → otomatik` arasında döner, seçim diske yazılır
+- 🎤 **mikrofon** (ortada, bir ton açık) — dikteyi başlatır/bitirir.
+  Sağ üstündeki **nokta** model durumunu söyler: yeşil = hazır, turuncu =
+  yükleniyor, kırmızı = hata
+- ⏺ **kilit** — sürekli dinleme moduna girer (çift-basışın fare karşılığı)
+
+`listening` biçiminde **✕ iptal eder** (metin yazılmaz), **✓ bitirir**. ✓ dolu
+beyaz, ✕ soluk gri — hangisinin birincil olduğu bakmadan anlaşılsın.
+
+**`result` kartı ne zaman çıkar:** metin imlece **yazılamadığında** — erişilebilirlik
+izni yoksa veya odakta bir şifre alanı varsa. Dikte kaybolmuyor, kartta duruyor
+ve Kopyala ile alınabiliyor.
+
+> Referanstaki "önce bir metin kutusu seç" davranışını **öncesinde** kontrol
+> etmiyoruz. Odaktaki alanın metin kutusu olup olmadığını AX ile sormak
+> gerekirdi; AX ise tam da bizim ana hedefimiz olan Electron (Cursor/VS Code) ve
+> terminal uygulamalarında güvenilmez. Yanlış "metin kutusu yok" kararı, çalışan
+> bir dikteyi engellerdi. Bu yüzden **önce yazmayı deniyoruz**, kart sadece
+> gerçekten başarısız olunca çıkıyor.
+
+**Kenara yapışma:** kartı bir kenara 140 px'den yakın bırakırsan o kenara
 yapışır (14 px boşlukla, 0.16 sn animasyonla). Dört kenar da destekleniyor.
-Konum hatırlanıyor.
+Konum hatırlanıyor. Boyut değişirken **alt-orta sabit kalır** — kart olduğu
+yerden büyür, kaymaz.
 
-**Açık/koyu tema:** `.popover` malzemesi ve semantik renkler (`separatorColor`,
-`secondaryLabelColor`) kullanılıyor → her iki temada doğru kontrast. Tema
-değişince otomatik yeniden çiziliyor. (`.hudWindow` her zaman koyu kalıyordu.)
+**Yüzey opak, blur yok.** Referans tasarım her duvar kâğıdının üstünde aynı
+koyulukta duruyor; yani vibrancy değil, düz koyu bir yüzey. `NSVisualEffectView`
+tamamen kaldırıldı. Yan faydası: `expanded` biçiminde etiket ve üç daire **ayrı
+yüzeyler** olarak çizilebiliyor, aralarından duvar kâğıdı görünüyor — tasarımın
+asıl karakteri bu. Blur'lu tek dikdörtgenle mümkün değildi.
 
-Karta tıklamak menü çubuğu ikonuyla aynı işi yapıyor; kısayol yapısı aynen
-geçerli. Menüden kapatılabilir: sağ tık → "Yüzen kart".
+> [!note] Bu, açık/koyu tema desteğinden vazgeçmek demek.
+> Kart artık her iki temada da koyu. Referans tasarım koyuya commit ettiği için
+> bilerek yapıldı; semantik renklerle taklit edilebilecek bir şey değildi.
+
+Kartın boş alanına tıklamak sadece `collapsed` biçimde dikteyi başlatır; açık
+biçimde düğmelerin arası taşıma tutamağıdır. Menüden kapatılabilir: sağ tık →
+"Yüzen kart".
 
 > Kapsül **non-activating** bir `NSPanel`: göründüğünde, sürüklendiğinde veya
 > tıklandığında odağı ÇALMAZ. Bu şart — aksi hâlde yazdığın uygulamanın imleç

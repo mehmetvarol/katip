@@ -66,12 +66,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if CommandLine.arguments.contains("--rendercard") {
             let dir = CommandLine.arguments.last ?? "/tmp"
-            let wave: [CGFloat] = [0.2,0.5,0.9,0.4,0.7,1.0,0.3,0.6,0.85,0.45,0.75,0.35,0.55,0.25]
-            HUDPanel.renderSample(state: .idle, levels: Array(repeating: 0.06, count: 14),
-                                  to: dir + "/card-idle.png")
-            HUDPanel.renderSample(state: .recording, levels: wave, to: dir + "/card-recording.png")
-            HUDPanel.renderSample(state: .locked, levels: wave, to: dir + "/card-locked.png")
-            HUDPanel.renderSample(state: .transcribing, levels: wave, to: dir + "/card-transcribing.png")
+            let flat = [CGFloat](repeating: 0.05, count: 16)
+            let wave: [CGFloat] = [0.2,0.5,0.9,0.4,0.7,1.0,0.3,0.6,0.85,0.45,0.75,0.35,0.55,0.25,0.6,0.4]
+            HUDPanel.renderSample(mode: .collapsed, levels: flat, to: dir + "/card-collapsed.png")
+            HUDPanel.renderSample(mode: .expanded, levels: flat, to: dir + "/card-expanded.png")
+            HUDPanel.renderSample(mode: .listening, levels: wave, to: dir + "/card-listening.png")
+            HUDPanel.renderSample(mode: .notice("Mikrofon izni yok"), levels: flat,
+                                  to: dir + "/card-notice.png")
+            HUDPanel.renderSample(mode: .result("Şu component'i refactor edelim, state yönetimi Zustand'a geçsin."),
+                                  levels: flat, to: dir + "/card-result.png")
             print("render edildi: \(dir)")
             exit(0)
         }
@@ -101,6 +104,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.onNeedsAccessibility = { [weak self] in
             self?.promptForAccessibility()
+        }
+        controller.onUndelivered = { [weak self] text in
+            self?.hud?.present(result: text)
         }
         if HUDPanel.isEnabled { showHUD() }
 
@@ -258,13 +264,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showHUD() {
         if hud == nil {
             let panel = HUDPanel()
-            // Karta tıklamak menü çubuğu ikonuyla aynı işi yapsın.
-            panel.onClick = { [weak self] in self?.controller.toggle() }
+            panel.onAction = { [weak self] action in self?.handle(action) }
             hud = panel
         }
         hud?.show()
         hud?.update(state: controller.state, level: 0)
         startAnimation()   // boştayken de yaşasın (dalgalar sönümlensin)
+    }
+
+    /// Karttaki düğmeler. Panel hiçbir kararı kendi vermiyor; hepsi buradan
+    /// tek durum makinesine gidiyor — ikon, kısayol ve kart aynı yolu kullansın.
+    private func handle(_ action: HUDPanel.Action) {
+        switch action {
+        case .dictate:  controller.toggle()
+        case .finish:   controller.toggle()
+        case .cancel:   controller.cancel()
+        case .lock:     controller.lock()
+        case .language: flash("Dikte dili: \(controller.cycleLanguage())")
+        case .copyText:
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(controller.lastTranscript, forType: .string)
+            hud?.dismissOverlay()
+        case .dismiss:  hud?.dismissOverlay()
+        }
     }
 
     private func hideHUD() {
@@ -326,7 +348,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Tıklamanın neden işe yaramadığını göster. Sessizlik en kötü cevap.
+    ///
+    /// Kart açıkken mesajı KARTTA gösteriyoruz: menü açmak odağı kapıyor, yani
+    /// yazacağımız uygulamanın imleç konumunu kaybediyoruz.
     private func flash(_ message: String) {
+        if let hud {
+            hud.present(notice: message)
+            startAnimation()
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2.5))
+                hud.dismissOverlay()
+            }
+            return
+        }
         let menu = NSMenu()
         let item = NSMenuItem(title: message, action: nil, keyEquivalent: "")
         item.isEnabled = false

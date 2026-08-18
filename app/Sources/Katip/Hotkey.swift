@@ -25,6 +25,18 @@ enum HotkeyChoice: String, CaseIterable {
         }
     }
 
+    /// Yüzen karttaki kısa gösterim — "Sağ Option (⌥)" oraya sığmıyor.
+    var glyph: String {
+        switch self {
+        case .rightOption:  "⌥"
+        case .rightCommand: "⌘"
+        case .rightControl: "⌃"
+        case .rightShift:   "⇧"
+        case .disabled:     ""
+        default:            title
+        }
+    }
+
     /// Modifier tuşları `flagsChanged` ile, F-tuşları `keyDown/keyUp` ile gelir.
     var isModifier: Bool {
         switch self {

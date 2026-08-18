@@ -49,6 +49,10 @@ final class DictationController {
     /// Erişilebilirlik izni yoksa uygulama tamamen işlevsiz — açılışta sorulmalı.
     var onNeedsAccessibility: (() -> Void)?
 
+    /// Metin imlece yazılamadıysa (izin yok / şifre alanı açık) çeviri kaybolmasın:
+    /// UI onu kartta gösterip kopyalatabilsin.
+    var onUndelivered: ((String) -> Void)?
+
     private(set) var lastTranscript: String = ""
 
     /// Anlık mikrofon seviyesi (0...1) — ikon animasyonunu besler.
@@ -69,6 +73,7 @@ final class DictationController {
             do {
                 Trace.log("model yükleniyor…")
                 try await transcriber.load()
+                await transcriber.setLanguage(language)
                 Trace.log("model hazır")
                 state = .idle
             } catch {
@@ -210,6 +215,7 @@ final class DictationController {
             Trace.log("HATA: \(error) — metin panoya bırakıldı")
             state = .error(error.localizedDescription)
             resetSoon()
+            if !lastTranscript.isEmpty { onUndelivered?(lastTranscript) }
         }
     }
 
@@ -306,6 +312,50 @@ final class DictationController {
     }
 
     private var isError: Bool { if case .error = state { return true }; return false }
+
+    /// Karttaki kilit düğmesi. Kayıt yoksa başlatıp doğrudan kilide geçer —
+    /// çift-basışla aynı sonuca fareyle de ulaşılsın.
+    func lock() {
+        switch state {
+        case .locked: finish()
+        case .recording: state = .locked
+        case .idle, .error:
+            begin()
+            if state == .recording { state = .locked }
+        default: onIgnoredClick?("Model hâlâ hazır değil.")
+        }
+    }
+
+    // MARK: - Dikte dili
+
+    private static let languageKey = "dictationLanguage"
+
+    /// `nil` = otomatik algıla. Varsayılan "tr": ölçümde dili sabitlemek
+    /// otomatik algılamadan belirgin şekilde iyi çıktı.
+    /// "auto" diske SENTINEL olarak yazılıyor — nil'i saklayamayız, yoksa
+    /// otomatik seçimi her açılışta "tr" olarak geri okurduk.
+    private(set) var language: String? = {
+        let raw = UserDefaults.standard.string(forKey: DictationController.languageKey) ?? "tr"
+        return raw == "auto" ? nil : raw
+    }()
+
+    var languageLabel: String { language?.uppercased() ?? "AUTO" }
+
+    /// Karttaki küre düğmesi: tr → en → otomatik → tr.
+    @discardableResult
+    func cycleLanguage() -> String {
+        let next: String?
+        switch language {
+        case "tr": next = "en"
+        case "en": next = nil
+        default:   next = "tr"
+        }
+        language = next
+        UserDefaults.standard.set(next ?? "auto", forKey: Self.languageKey)
+        Task { await transcriber.setLanguage(next) }
+        Trace.log("dikte dili → \(languageLabel)")
+        return languageLabel
+    }
 
     func cancel() {
         stopStreaming()
