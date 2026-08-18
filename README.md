@@ -48,12 +48,37 @@ pratikte tek makul seçenek.
 
 ## Kurulum
 
+Katip **notarize edilmiş bir binary dağıtmıyor** — Apple Developer Program
+üyeliği (99 $/yıl) gerektirmeden açık kaynak kalmak için bilerek KAYNAKTAN
+DERLENİYOR. İki yol da aynı şeyi yapar, hangisi rahatına uyuyorsa:
+
+**Homebrew ile:**
 ```bash
-cd app && ./build.sh --run
+brew install --HEAD mehmetvarol/katip/katip
 ```
 
-`Katip.app` derlenir, `/Applications`'a kurulur ve başlar. Menü çubuğunda 🎤
-ikonu belirir.
+**Doğrudan:**
+```bash
+git clone https://github.com/mehmetvarol/katip.git && cd katip/app && ./build.sh --run
+```
+
+İkisi de `Katip.app`'i derler ve **ad-hoc imzalar** (kimliksiz). Bunun bedeli:
+TCC (izin veritabanı) kayıtları imzaya bağlı olduğu için **her güncellemede**
+Mikrofon, Erişilebilirlik ve Giriş İzleme izinlerini yeniden vermen gerekir —
+bu bir hata değil, imzasız dağıtımın doğal sonucu.
+
+> [!warning] İlk çalıştırmada Gatekeeper engelleyecek
+> macOS 15'ten beri sağ tık → Aç ile atlatma kaldırıldı. Açmak için:
+> **Sistem Ayarları → Gizlilik ve Güvenlik → aşağı kaydır → "Yine de Aç"**
+> Bu düğme ilk denemeden sonra **~1 saat** görünür kalır — kaçırırsan
+> uygulamayı yeniden çift tıklayıp süreyi sıfırla.
+
+Kendi Apple Developer Program kimliğin varsa kalıcı izin için:
+```bash
+KATIP_SIGN_ID="Developer ID Application: Ad Soyad (TEAMID)" ./app/build.sh --run
+```
+
+Kurulumdan sonra menü çubuğunda 🎤 ikonu belirir.
 
 **Kullanım — üç yol, hepsi aynı durum makinesine bağlı:**
 
