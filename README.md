@@ -107,11 +107,11 @@ gibi davranır — **yer değiştirmez, şekil değiştirir.** Beş biçim var:
 
 | Biçim | Ne zaman | Ne var içinde |
 |---|---|---|
-| **collapsed** (78×26) | boşta | ince bir çizgi; neredeyse görünmez |
-| **expanded** (176×96) | fare üstüne gelince | kısayol etiketi + üç yuvarlak düğme |
-| **listening** (176×44) | konuşurken | ✕ · ses dalgası · ✓ |
+| **collapsed** (58×18) | boşta | ince bir çizgi; neredeyse görünmez |
+| **expanded** (136×74) | fare üstüne gelince | kısayol etiketi + üç yuvarlak düğme |
+| **listening** (140×32) | konuşurken | ✕ · ses dalgası · ✓ |
 | **notice** (otomatik en) | uyarı | ⚠︎ + mesaj + ✕ |
-| **result** (344×180) | metin yazılamadıysa | dikte metni + **Kopyala** |
+| **result** (280×140) | metin yazılamadıysa | dikte metni + **Kopyala** |
 
 `expanded` biçimindeki üç düğme:
 
@@ -134,6 +134,19 @@ ve Kopyala ile alınabiliyor.
 > terminal uygulamalarında güvenilmez. Yanlış "metin kutusu yok" kararı, çalışan
 > bir dikteyi engellerdi. Bu yüzden **önce yazmayı deniyoruz**, kart sadece
 > gerçekten başarısız olunca çıkıyor.
+
+**Ses animasyonu** kaydırmalı bir histogram değil, **akan bir dalga**: ortada
+yüksek uçlarda sönen bir siluetin üstünden soldan sağa geçen bir dalga, canlı
+mikrofon enerjisiyle ölçekleniyor. Zarf **ataklı** — sese hızlı yükselir, yavaş
+iner; simetrik yumuşatma konuşmanın vuruşunu ezip animasyonu cansız gösteriyordu.
+Sessizlikte çubuklar taban seviyesine iner, yani animasyon **dürüst**: ses yoksa
+hareket de yok.
+
+Çeviri sırasında desen değişiyor: soldan sağa geçen tek bir kabarcık. Mikrofon
+kapalıyken sahte ses dalgası göstermek yalan olurdu.
+
+30 fps'te çiziliyor (15 fps'te akış kesik görünüyordu). Boştayken döngü tamamen
+duruyor → **ölçülen boşta CPU %0.0**.
 
 **Kenara yapışma:** kartı bir kenara 140 px'den yakın bırakırsan o kenara
 yapışır (14 px boşlukla, 0.16 sn animasyonla). Dört kenar da destekleniyor.
@@ -192,15 +205,30 @@ Model indirilir (~1.6 GB). İkon ⬇︎ iken bekle. Sonraki açılışlar ~10 sa
 
 Durumu izlemek için: `tail -f ~/Library/Application\ Support/Katip/katip.log`
 
-## Akan metin (VAD parçalama)
+## Parçalı çeviri, tek seferde yazma (VAD parçalama)
 
-Konuşma **cümle aralarındaki sessizlikten** bölünüyor; her parça ayrı çevrilip
-imlece yazılıyor. **Hem bas-tut hem kilit modunda** çalışır — uzun konuşmada
-metin akarak gelir, sonda toplu bekleme olmaz.
+Konuşma **cümle aralarındaki sessizlikten** bölünüyor ve her parça konuşma
+sürerken ayrı ayrı çevriliyor. Ama **imlece yazma sona bırakılıyor** — dikteyi
+bitirdiğinde metnin tamamı **tek parça** olarak yapıştırılıyor.
 
-Neden önemli: ölçülen gerçek dikte süresi ortalama **71 saniye** (vibe coding'de
-uzun prompt söyleniyor). Akış olmadan bitişte ~13 saniye bekleniyordu; akışla
-bekleme son cümleye iniyor.
+```
+konuşma  ──VAD──▶ parça 1 ─┐
+                  parça 2 ─┤ (konuşurken çevrilir)
+                  parça 3 ─┘
+                             └──▶ birleştir ──▶ TEK yapıştırma
+```
+
+İki ayrı sorunu birlikte çözüyor:
+
+- **Bekleme.** Ölçülen gerçek dikte süresi ortalama **71 saniye**. Her şeyi sonda
+  çevirmek bitişte ~13 saniye bekletiyordu; parçalı çeviriyle bekleme yalnızca
+  son cümleye iniyor.
+- **Yapıştırma gürültüsü.** Parçaları geldikçe yazmak (önceki davranış) her
+  duraklamada imlece bir şey eklenmesi demekti. Kullanıcı bunu *"her sustuğumda
+  kopyalıyor"* diye bildirdi. Ayrıca her yapıştırma panoyu geçici olarak ezdiği
+  için uzun diktede pano defalarca kirleniyordu.
+
+Geçmişe de artık **oturum başına tek kayıt** düşüyor, cümle başına değil.
 
 Kısa diktede davranış değişmez — VAD kesmek için ≥0.6 sn konuşma + ≥0.45 sn
 sessizlik ister, tek cümle bölünmez.
@@ -223,7 +251,8 @@ Kesim noktalarını yazdırır. VAD ayrı bir tipte olmasının sebebi bu — ko
 doğrulanabiliyor.
 
 > Son cümleden sonra yeterli sessizlik yoksa o parça **artık** olarak bekler ve
-> kilit modunu bitirdiğinde gönderilir. Kayıp yok.
+> bitişte birleştirmeye katılır. Kayıp yok — "kayıt çok kısa" ve "ses algılanmadı"
+> yolları da biriken parçaları yazmadan çıkmıyor.
 
 ## Geçmiş
 

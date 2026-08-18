@@ -260,11 +260,19 @@ final class HUDPanel: NSPanel {
     /// Geliştirme yardımcısı: bir biçimi PNG'ye render eder.
     /// Ekran görüntüsü izni olmadan görünümü doğrulamak için — kartın bomboş
     /// çıktığı hatayı bir kez ancak böyle yakalayabildik.
-    static func renderSample(mode: Mode, levels: [CGFloat], to path: String) {
+    /// `ticks` > 0 ise sahte ses seviyesiyle animasyon o kadar kare ilerletilir —
+    /// durağan bir kare, akan dalganın gerçekten aktığını göstermiyor.
+    static func renderSample(mode: Mode, levels: [CGFloat], to path: String,
+                             ticks: Int = 0, level: Float = 0.06) {
         let view = CardView(frame: NSRect(origin: .zero, size: CardView.size(for: mode)))
-        view.debugLevels = levels
         view.mode = mode
-        view.apply(state: mode == .listening ? .recording : .idle, level: 0)
+        if ticks > 0 {
+            let state: DictationController.State = mode == .listening ? .recording : .transcribing
+            for _ in 0..<ticks { view.apply(state: state, level: level) }
+        } else {
+            view.debugLevels = levels
+            view.apply(state: mode == .listening ? .recording : .idle, level: 0)
+        }
 
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
@@ -295,6 +303,19 @@ private final class CardView: NSView {
     private var hovered: HUDPanel.Action?
     private var dragOrigin: NSPoint?
 
+    /// Yumuşatılmış canlı ses enerjisi (0...1).
+    private var energy: CGFloat = 0
+
+    /// Hedef yüksekliği hesaplayıp mevcut değerleri ona doğru yumuşatır.
+    /// `x` çubuğun 0...1 aralığındaki konumu.
+    private func shape(_ target: (Int, CGFloat) -> CGFloat) {
+        let last = CGFloat(max(1, levels.count - 1))
+        for index in levels.indices {
+            let x = CGFloat(index) / last
+            levels[index] += (target(index, x) - levels[index]) * 0.42
+        }
+    }
+
     private static let floor: CGFloat = 0.05
     private(set) var isSettled = false
     var debugLevels: [CGFloat]?
@@ -305,11 +326,11 @@ private final class CardView: NSView {
 
     static func size(for mode: HUDPanel.Mode) -> NSSize {
         switch mode {
-        case .collapsed: NSSize(width: 78, height: 26)
-        case .expanded:  NSSize(width: 176, height: 96)
-        case .listening: NSSize(width: 176, height: 44)
-        case .notice(let text): NSSize(width: min(360, max(180, textWidth(text, 12) + 92)), height: 40)
-        case .result:    NSSize(width: 344, height: 180)
+        case .collapsed: NSSize(width: 58, height: 18)
+        case .expanded:  NSSize(width: 136, height: 74)
+        case .listening: NSSize(width: 140, height: 32)
+        case .notice(let text): NSSize(width: min(320, max(150, textWidth(text, 11) + 76)), height: 30)
+        case .result:    NSSize(width: 280, height: 140)
         }
     }
 
@@ -400,17 +421,33 @@ private final class CardView: NSView {
         switch state {
         case .recording, .locked:
             isSettled = false
-            levels.removeFirst()
-            levels.append(max(0.08, min(1, CGFloat(level) * 6)))
+            // Ataklı zarf: sese HIZLI yüksel, yavaş in. Simetrik yumuşatma
+            // konuşmanın vuruşunu ezip animasyonu cansız gösteriyordu.
+            let raw = min(1, CGFloat(level) * 7)
+            energy += (raw - energy) * (raw > energy ? 0.55 : 0.16)
+            phase += 0.34
+            shape { index, x in
+                // Ortada yüksek, uçlarda sönen siluet × soldan sağa akan dalga.
+                let envelope = 0.30 + 0.70 * sin(.pi * x)
+                let travel = 0.55 + 0.45 * sin(self.phase - CGFloat(index) * 0.55)
+                return max(0.05, self.energy * envelope * travel)
+            }
+
         case .transcribing:
             isSettled = false
-            phase += 0.3
-            for index in levels.indices {
-                levels[index] = 0.16 + 0.42 * abs(sin(phase - CGFloat(index) * 0.45))
+            phase += 0.22
+            // Soldan sağa geçen tek bir kabarcık — "çalışıyor" der, seviye taklidi
+            // yapmaz. Mikrofon kapalıyken sahte ses dalgası göstermek yalan olurdu.
+            let head = (phase * 0.09).truncatingRemainder(dividingBy: 1.5) - 0.25
+            shape { _, x in
+                let distance = abs(x - head)
+                return 0.10 + 0.75 * exp(-pow(distance / 0.16, 2))
             }
+
         default:
+            energy = 0
             for index in levels.indices {
-                levels[index] = max(Self.floor, levels[index] * 0.78)
+                levels[index] = max(Self.floor, levels[index] * 0.74)
             }
             isSettled = levels.allSatisfy { $0 <= Self.floor + 0.001 }
         }
@@ -440,42 +477,44 @@ private final class CardView: NSView {
         var l = Layout()
         switch mode {
         case .collapsed:
-            l.line = NSRect(x: bounds.midX - 19, y: bounds.midY - 3, width: 38, height: 6)
+            l.line = NSRect(x: bounds.midX - 13, y: bounds.midY - 2, width: 26, height: 4)
 
         case .expanded:
             // Düğme sırası ALTTA, etiket ÜSTTE — fare çubuğun olduğu yerde kalsın
             // diye kart yukarı doğru açılıyor.
-            let cy: CGFloat = 26
+            let cy: CGFloat = 20
             l.buttons = [
-                (.language, circle(x: bounds.midX - 50, y: cy, d: 38)),
-                (.dictate,  circle(x: bounds.midX,      y: cy, d: 46)),
-                (.lock,     circle(x: bounds.midX + 50, y: cy, d: 38)),
+                (.language, circle(x: bounds.midX - 39, y: cy, d: 29)),
+                (.dictate,  circle(x: bounds.midX,      y: cy, d: 36)),
+                (.lock,     circle(x: bounds.midX + 39, y: cy, d: 29)),
             ]
-            let width = min(bounds.width - 8, Self.textWidth(hintTitle, 13) + 30)
-            l.label = NSRect(x: bounds.midX - width / 2, y: 60, width: width, height: 32)
+            let width = min(bounds.width - 6, Self.textWidth(hintTitle, 11) + 24)
+            l.label = NSRect(x: bounds.midX - width / 2, y: 47, width: width, height: 25)
 
         case .listening:
-            let d: CGFloat = 28
+            let d: CGFloat = 22
+            let inset: CGFloat = 5
             l.buttons = [
-                (.cancel,  circle(x: 8 + d / 2, y: bounds.midY, d: d)),
-                (.finish,  circle(x: bounds.maxX - 8 - d / 2, y: bounds.midY, d: d)),
+                (.cancel,  circle(x: inset + d / 2, y: bounds.midY, d: d)),
+                (.finish,  circle(x: bounds.maxX - inset - d / 2, y: bounds.midY, d: d)),
             ]
-            l.wave = NSRect(x: 8 + d + 10, y: bounds.minY + 12,
-                            width: bounds.width - 2 * (8 + d + 10), height: bounds.height - 24)
+            let gap = inset + d + 7
+            l.wave = NSRect(x: gap, y: bounds.minY + 7,
+                            width: bounds.width - 2 * gap, height: bounds.height - 14)
 
         case .notice:
-            l.mark = NSRect(x: 14, y: bounds.midY - 8, width: 16, height: 16)
-            l.body = NSRect(x: 38, y: bounds.midY - 8, width: bounds.width - 38 - 40, height: 17)
-            l.buttons = [(.dismiss, circle(x: bounds.maxX - 22, y: bounds.midY, d: 24))]
+            l.mark = NSRect(x: 11, y: bounds.midY - 6, width: 13, height: 13)
+            l.body = NSRect(x: 30, y: bounds.midY - 7, width: bounds.width - 30 - 32, height: 15)
+            l.buttons = [(.dismiss, circle(x: bounds.maxX - 17, y: bounds.midY, d: 19))]
 
         case .result:
-            l.mark = NSRect(x: 24, y: bounds.maxY - 44, width: 18, height: 18)
-            l.hint = NSRect(x: 52, y: bounds.maxY - 44, width: bounds.width - 52 - 60, height: 18)
+            l.mark = NSRect(x: 18, y: bounds.maxY - 34, width: 14, height: 14)
+            l.hint = NSRect(x: 40, y: bounds.maxY - 35, width: bounds.width - 40 - 46, height: 15)
             l.buttons = [
-                (.dismiss,  circle(x: bounds.maxX - 34, y: bounds.maxY - 35, d: 28)),
-                (.copyText, NSRect(x: bounds.maxX - 24 - 82, y: 22, width: 82, height: 32)),
+                (.dismiss,  circle(x: bounds.maxX - 26, y: bounds.maxY - 27, d: 22)),
+                (.copyText, NSRect(x: bounds.maxX - 18 - 66, y: 16, width: 66, height: 25)),
             ]
-            l.body = NSRect(x: 24, y: 66, width: bounds.width - 48, height: bounds.height - 66 - 54)
+            l.body = NSRect(x: 18, y: 50, width: bounds.width - 36, height: bounds.height - 50 - 42)
         }
         return l
     }
@@ -524,17 +563,17 @@ private final class CardView: NSView {
 
         case .notice(let text):
             fillSurface(bounds, radius: bounds.height / 2)
-            drawSymbol("exclamationmark.triangle.fill", in: l.mark, points: 13,
+            drawSymbol("exclamationmark.triangle.fill", in: l.mark, points: 11,
                        color: .systemOrange)
-            draw(text, in: l.body, points: 12, weight: .regular, color: Self.glyph, align: .left)
+            draw(text, in: l.body, points: 11, weight: .regular, color: Self.glyph, align: .left)
             for (action, rect) in l.buttons { drawCircle(action, rect) }
 
         case .result(let text):
-            fillSurface(bounds, radius: 26)
-            drawSymbol("waveform", in: l.mark, points: 15, color: Self.glyph)
+            fillSurface(bounds, radius: 20)
+            drawSymbol("waveform", in: l.mark, points: 12, color: Self.glyph)
             draw("İmlece yazılamadı — kopyalayabilirsin", in: l.hint,
-                 points: 12, weight: .regular, color: Self.muted, align: .center)
-            draw(text, in: l.body, points: 17, weight: .regular, color: Self.glyph,
+                 points: 10.5, weight: .regular, color: Self.muted, align: .center)
+            draw(text, in: l.body, points: 13.5, weight: .regular, color: Self.glyph,
                  align: .left, wraps: true)
             for (action, rect) in l.buttons { drawCircle(action, rect) }
         }
@@ -549,12 +588,12 @@ private final class CardView: NSView {
     private func drawHint(in rect: NSRect) {
         let text = NSMutableAttributedString(
             string: "Dikte", attributes: [
-                .font: NSFont.systemFont(ofSize: 13, weight: .regular),
+                .font: NSFont.systemFont(ofSize: 11, weight: .regular),
                 .foregroundColor: Self.muted])
         let glyph = HotkeyChoice.current.glyph
         if !glyph.isEmpty {
             text.append(NSAttributedString(string: "  \(glyph)", attributes: [
-                .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
                 .foregroundColor: Self.glyph]))
         }
         let size = text.size()
@@ -591,21 +630,21 @@ private final class CardView: NSView {
         }
 
         if isPill {
-            draw("Kopyala", in: NSRect(x: rect.minX, y: rect.midY - 9, width: rect.width, height: 18),
-                 points: 13, weight: .medium, color: Self.glyph, align: .center)
+            draw("Kopyala", in: NSRect(x: rect.minX, y: rect.midY - 7, width: rect.width, height: 15),
+                 points: 11, weight: .medium, color: Self.glyph, align: .center)
             return
         }
 
         let tint: NSColor = isPrimary ? NSColor(white: 0.08, alpha: 1) : Self.glyph
-        let points = rect.width * 0.42
+        let points = rect.width * 0.44
         drawSymbol(symbolName(action), in: rect, points: points, color: tint)
 
         // Yeşil nokta: mikrofon düğmesinin sağ üstünde, modelin hazır olduğunu söyler.
         if action == .dictate, let dot = statusDot {
-            let d: CGFloat = 9
-            let spot = NSRect(x: rect.maxX - d - 1, y: rect.maxY - d - 1, width: d, height: d)
+            let d: CGFloat = 7
+            let spot = NSRect(x: rect.maxX - d, y: rect.maxY - d, width: d, height: d)
             Self.surface.setFill()
-            NSBezierPath(ovalIn: spot.insetBy(dx: -1.5, dy: -1.5)).fill()
+            NSBezierPath(ovalIn: spot.insetBy(dx: -1.2, dy: -1.2)).fill()
             dot.setFill()
             NSBezierPath(ovalIn: spot).fill()
         }
@@ -627,12 +666,12 @@ private final class CardView: NSView {
     /// boşta %9 CPU yakıyordu, o yüzden hareket sadece iş varken.
     private func drawWave(in area: NSRect) {
         guard area.width > 10 else { return }
-        let spacing: CGFloat = 3
-        let minBar: CGFloat = 3
+        let spacing: CGFloat = 2
+        let minBar: CGFloat = 2
         let fits = Int((area.width + spacing) / (minBar + spacing))
         let count = max(3, min(levels.count, fits))
         let barWidth = (area.width - spacing * CGFloat(count - 1)) / CGFloat(count)
-        let shown = levels.suffix(count)
+        let shown = levels.prefix(count)   // desen artık geçmiş değil, akan dalga
 
         (state == .locked ? NSColor.systemOrange : Self.wave).setFill()
         for (index, value) in shown.enumerated() {

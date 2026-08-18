@@ -78,7 +78,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let wave: [CGFloat] = [0.2,0.5,0.9,0.4,0.7,1.0,0.3,0.6,0.85,0.45,0.75,0.35,0.55,0.25,0.6,0.4]
             HUDPanel.renderSample(mode: .collapsed, levels: flat, to: dir + "/card-collapsed.png")
             HUDPanel.renderSample(mode: .expanded, levels: flat, to: dir + "/card-expanded.png")
-            HUDPanel.renderSample(mode: .listening, levels: wave, to: dir + "/card-listening.png")
+            // Akan dalgayı dört farklı karede göster: tek kare akışı kanıtlamıyor.
+            for (index, ticks) in [10, 14, 18, 22].enumerated() {
+                HUDPanel.renderSample(mode: .listening, levels: wave,
+                                      to: dir + "/card-listening-\(index).png", ticks: ticks)
+            }
+            HUDPanel.renderSample(mode: .listening, levels: wave,
+                                  to: dir + "/card-listening.png", ticks: 16)
             HUDPanel.renderSample(mode: .notice("Mikrofon izni yok"), levels: flat,
                                   to: dir + "/card-notice.png")
             HUDPanel.renderSample(mode: .result("Şu component'i refactor edelim, state yönetimi Zustand'a geçsin."),
@@ -706,7 +712,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// mikrofonun seni gerçekten duyduğunu söyler — asıl kritik geri bildirim bu.
     private func startAnimation() {
         guard animationTimer == nil else { return }
-        animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15.0, repeats: true) { [weak self] _ in
+        // 30 fps: akan dalga 15 fps'te kesik görünüyordu. Boşta zaten duruyor
+        // (isSettled ile), o yüzden pil maliyeti sadece dikte sürerken.
+        animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
     }

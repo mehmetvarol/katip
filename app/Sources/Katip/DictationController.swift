@@ -120,7 +120,8 @@ final class DictationController {
         do {
             try recorder.start()
             Trace.log("kayıt başladı")
-            wroteInSession = false
+            pieces.removeAll()
+            spokenSeconds = 0
             state = .recording
             startStreaming()
         } catch {
@@ -132,19 +133,22 @@ final class DictationController {
         awaitingSecondTap = false
         secondTapTask?.cancel()
 
-        // Kilit modunda parçalar zaten yazıldı; burada sadece kalan artık var.
-        // O artık kısa olabilir, minimum süre şartını uygulama.
+        // Akışta çevrilmiş parçalar varsa kalan artık kısa olabilir; minimum
+        // süre şartını uygulama.
         let wasStreaming = (state == .locked)
         stopStreaming()
 
         let samples: [Float]
         do {
             // Akışta parçalar zaten yazıldıysa kalan artık kısa olabilir.
-            samples = try recorder.stop(requireMinimum: !wasStreaming && !wroteInSession)
+            samples = try recorder.stop(requireMinimum: !wasStreaming && pieces.isEmpty)
             Trace.log("kayıt bitti — \(samples.count) örnek (\(String(format: "%.1f", Double(samples.count) / AudioRecorder.sampleRate)) sn), tepe seviye \(String(format: "%.3f", recorder.lastPeak))")
         } catch {
             Trace.log("kayıt HATA: \(error)")
-            if wasStreaming || wroteInSession { state = .idle }
+            // Biriken parçalar burada YAZILMALI; yoksa "son parça çok kısaydı"
+            // diye tüm dikte sessizce çöpe gider.
+            guard pieces.isEmpty else { completeSession(); return }
+            if wasStreaming { state = .idle }
             else { state = .error(error.localizedDescription); resetSoon() }
             return
         }
@@ -154,8 +158,9 @@ final class DictationController {
         // Türkçe'de uydurma altyazı üretmeye itiyor ("Altyazı M.K." çıktı).
         guard recorder.lastPeak >= 0.02 else {
             Trace.log("ses yok (tepe \(String(format: "%.3f", recorder.lastPeak))) — çeviri atlandı")
-            if wasStreaming || wroteInSession {
-                state = .idle          // parçalar yazıldı, artık sessizdi: normal
+            guard pieces.isEmpty else { completeSession(); return }
+            if wasStreaming {
+                state = .idle
             } else {
                 state = .error("Ses algılanmadı — mikrofonu kontrol et")
                 resetSoon()
@@ -165,9 +170,16 @@ final class DictationController {
 
         state = .transcribing
         enqueueDelivery(samples)
+        completeSession()
+    }
+
+    /// Bekleyen tüm çevirilerin bitmesini bekler, sonra metni TEK seferde yazar.
+    private func completeSession() {
+        state = .transcribing
         Task { [weak self] in
             await self?.deliveryChain?.value
             guard let self else { return }
+            await self.flush()
             if case .transcribing = self.state { self.state = .idle }
         }
     }
@@ -178,9 +190,13 @@ final class DictationController {
     /// gelirse metin karışık sırada yapışır. Her teslim bir öncekini bekler.
     private var deliveryChain: Task<Void, Never>?
 
-    /// Bu dikte oturumunda daha önce metin yazıldı mı — parçalar arasına boşluk
-    /// koymak için. Olmazsa "birinci cümle.ikinci cümle" diye bitişik yapışıyor.
-    private var wroteInSession = false
+    /// Oturum boyunca çevrilen parçalar. Tek seferde yazılacak.
+    ///
+    /// Parçaları geldikçe yapıştırmak (eski davranış) her duraklamada imlece bir
+    /// şey yazılması demekti; kullanıcı bunu "her sustuğumda kopyalıyor" diye
+    /// bildirdi. Çeviri hâlâ parçalı — iş konuşma sürerken yapılıyor, sadece
+    /// TESLİM sona alındı. Böylece bekleme uzamıyor ama yapıştırma bir kez oluyor.
+    private var pieces: [String] = []
 
     private func enqueueDelivery(_ samples: [Float]) {
         let previous = deliveryChain
@@ -196,26 +212,41 @@ final class DictationController {
             let text = try await transcriber.transcribe(samples)
             Trace.log("çeviri \(String(format: "%.2f", Date().timeIntervalSince(started))) sn → \"\(text)\"")
             guard !text.isEmpty else { return }
-
-            lastTranscript = text
-            let target = FocusTracker.shared.previousApp?.localizedName
-            // Aynı oturumdaki sonraki parçalar öncekine yapışmasın.
-            let piece = wroteInSession ? " " + text : text
-            try await TextInjector.inject(piece)
-            wroteInSession = true
-            Trace.log("metin yazıldı ✔")
-            History.shared.add(text: text, app: target,
-                               seconds: Double(samples.count) / AudioRecorder.sampleRate)
-            NotificationCenter.default.post(name: .katipHistoryChanged, object: nil)
+            pieces.append(text)
+            spokenSeconds += Double(samples.count) / AudioRecorder.sampleRate
         } catch {
-            if !lastTranscript.isEmpty {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(lastTranscript, forType: .string)
-            }
-            Trace.log("HATA: \(error) — metin panoya bırakıldı")
+            Trace.log("çeviri HATASI: \(error)")
             state = .error(error.localizedDescription)
             resetSoon()
-            if !lastTranscript.isEmpty { onUndelivered?(lastTranscript) }
+        }
+    }
+
+    private var spokenSeconds: Double = 0
+
+    /// Oturumun tamamını TEK seferde imlece yazar.
+    private func flush() async {
+        let text = pieces.joined(separator: " ")
+        let seconds = spokenSeconds
+        pieces.removeAll()
+        spokenSeconds = 0
+        guard !text.isEmpty else { return }
+
+        lastTranscript = text
+        let target = FocusTracker.shared.previousApp?.localizedName
+        do {
+            try await TextInjector.inject(text)
+            Trace.log("metin yazıldı ✔ (\(text.count) karakter, tek parça)")
+            History.shared.add(text: text, app: target, seconds: seconds)
+            NotificationCenter.default.post(name: .katipHistoryChanged, object: nil)
+        } catch {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            Trace.log("HATA: \(error) — metin panoya bırakıldı")
+            History.shared.add(text: text, app: target, seconds: seconds)
+            NotificationCenter.default.post(name: .katipHistoryChanged, object: nil)
+            state = .error(error.localizedDescription)
+            resetSoon()
+            onUndelivered?(text)
         }
     }
 
@@ -360,6 +391,8 @@ final class DictationController {
     func cancel() {
         stopStreaming()
         recorder.cancel()
+        pieces.removeAll()          // iptal: çevrilmiş parçalar da atılır
+        spokenSeconds = 0
         state = .idle
     }
 
