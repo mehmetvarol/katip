@@ -115,7 +115,9 @@ final class DictationController {
         do {
             try recorder.start()
             Trace.log("kayıt başladı")
+            wroteInSession = false
             state = .recording
+            startStreaming()
         } catch {
             state = .error("Kayıt başlatılamadı: \(error.localizedDescription)")
         }
@@ -132,11 +134,13 @@ final class DictationController {
 
         let samples: [Float]
         do {
-            samples = try recorder.stop(requireMinimum: !wasStreaming)
+            // Akışta parçalar zaten yazıldıysa kalan artık kısa olabilir.
+            samples = try recorder.stop(requireMinimum: !wasStreaming && !wroteInSession)
             Trace.log("kayıt bitti — \(samples.count) örnek (\(String(format: "%.1f", Double(samples.count) / AudioRecorder.sampleRate)) sn), tepe seviye \(String(format: "%.3f", recorder.lastPeak))")
         } catch {
             Trace.log("kayıt HATA: \(error)")
-            if wasStreaming { state = .idle } else { state = .error(error.localizedDescription); resetSoon() }
+            if wasStreaming || wroteInSession { state = .idle }
+            else { state = .error(error.localizedDescription); resetSoon() }
             return
         }
 
@@ -145,7 +149,7 @@ final class DictationController {
         // Türkçe'de uydurma altyazı üretmeye itiyor ("Altyazı M.K." çıktı).
         guard recorder.lastPeak >= 0.02 else {
             Trace.log("ses yok (tepe \(String(format: "%.3f", recorder.lastPeak))) — çeviri atlandı")
-            if wasStreaming {
+            if wasStreaming || wroteInSession {
                 state = .idle          // parçalar yazıldı, artık sessizdi: normal
             } else {
                 state = .error("Ses algılanmadı — mikrofonu kontrol et")
@@ -155,14 +159,32 @@ final class DictationController {
         }
 
         state = .transcribing
-        Task {
-            await deliver(samples)
-            if case .transcribing = state { state = .idle }
+        enqueueDelivery(samples)
+        Task { [weak self] in
+            await self?.deliveryChain?.value
+            guard let self else { return }
+            if case .transcribing = self.state { self.state = .idle }
         }
     }
 
     /// Çevir ve imlece yaz. Kilit modunda her cümle parçası için ayrı çağrılır,
     /// çağrılar sıralı olduğu için metin doğru sırada birikir.
+    /// Teslimler SIRALI olmalı: akış parçası ile bitişteki artık aynı anda
+    /// gelirse metin karışık sırada yapışır. Her teslim bir öncekini bekler.
+    private var deliveryChain: Task<Void, Never>?
+
+    /// Bu dikte oturumunda daha önce metin yazıldı mı — parçalar arasına boşluk
+    /// koymak için. Olmazsa "birinci cümle.ikinci cümle" diye bitişik yapışıyor.
+    private var wroteInSession = false
+
+    private func enqueueDelivery(_ samples: [Float]) {
+        let previous = deliveryChain
+        deliveryChain = Task { [weak self] in
+            await previous?.value
+            await self?.deliver(samples)
+        }
+    }
+
     private func deliver(_ samples: [Float]) async {
         do {
             let started = Date()
@@ -172,7 +194,10 @@ final class DictationController {
 
             lastTranscript = text
             let target = FocusTracker.shared.previousApp?.localizedName
-            try await TextInjector.inject(text)
+            // Aynı oturumdaki sonraki parçalar öncekine yapışmasın.
+            let piece = wroteInSession ? " " + text : text
+            try await TextInjector.inject(piece)
+            wroteInSession = true
             Trace.log("metin yazıldı ✔")
             History.shared.add(text: text, app: target,
                                seconds: Double(samples.count) / AudioRecorder.sampleRate)
@@ -195,16 +220,26 @@ final class DictationController {
     /// Kilit modunda cümle aralarındaki sessizlikten bölüp her parçayı ayrı
     /// çevirir. Böylece uzun konuşmada metin AKARAK gelir; sonda toplu bekleme
     /// olmaz (39 sn konuşma tek seferde 7.3 sn bekletiyordu).
+    /// Kayıt SÜRERKEN cümle aralarındaki sessizlikten bölüp yazar.
+    ///
+    /// Artık kilit moduna özel değil — bas-tut'ta da çalışıyor. Gerekçe ölçüm:
+    /// gerçek diktelerin ortalaması **71 saniye** (uzun prompt söylüyoruz), ve
+    /// bu sürede bitişte ~13 sn bekleniyordu. Akışla bekleme son cümleye iniyor.
+    /// Kısa diktede zaten kesme olmaz (VAD ≥0.6 sn konuşma + ≥0.45 sn sessizlik ister).
     private func startStreaming() {
         streamTask?.cancel()
         streamTask = Task { [weak self] in
-            Trace.log("kilit modu akışı başladı")
+            Trace.log("akış başladı")
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(150))
-                guard let self, self.state == .locked else { break }
+                guard let self else { break }
+                switch self.state {
+                case .recording, .locked: break
+                default: return                     // kayıt bitti, döngüyü kapat
+                }
                 guard let segment = self.recorder.takeSegment() else { continue }
                 Trace.log("parça hazır — \(String(format: "%.1f", Double(segment.count) / AudioRecorder.sampleRate)) sn")
-                await self.deliver(segment)
+                self.enqueueDelivery(segment)
             }
         }
     }
@@ -239,8 +274,7 @@ final class DictationController {
             secondTapTask?.cancel()
             if state == .recording {
                 Trace.log("çift bas → KİLİT modu")
-                state = .locked
-                startStreaming()
+                state = .locked   // akış begin()'de başladı, sürüyor
             }
             return
         }

@@ -60,7 +60,7 @@ ikonu belirir.
 | Jest | Ne olur |
 |---|---|
 | İkona **sol tık** | Dinlemeye başlar · tekrar tık → yazıya çevirir |
-| Kısayola **basılı tut** | Bas-konuş: bıraktığında çevirir |
+| Kısayola **basılı tut** | Bas-konuş — konuşurken metin cümle cümle akar |
 | Kısayola **çift bas** | 🔒 Kilit modu: elini çek, sürekli dinler · tuşa bas → bitir |
 | İkona **sağ tık** | Menü (kısayol seçimi, sözlük, düzeltme tablosu, çıkış) |
 
@@ -135,11 +135,18 @@ Model indirilir (~1.6 GB). İkon ⬇︎ iken bekle. Sonraki açılışlar ~10 sa
 
 Durumu izlemek için: `tail -f ~/Library/Application\ Support/Katip/katip.log`
 
-## Kilit modunda akan metin (Adım 4)
+## Akan metin (VAD parçalama)
 
-Kilit modunda (kısayola çift bas) konuşma artık **cümle aralarındaki
-sessizlikten bölünüyor**; her parça ayrı çevrilip imlece yazılıyor. Uzun
-konuşmada metin akarak geliyor, sonda toplu bekleme olmuyor.
+Konuşma **cümle aralarındaki sessizlikten** bölünüyor; her parça ayrı çevrilip
+imlece yazılıyor. **Hem bas-tut hem kilit modunda** çalışır — uzun konuşmada
+metin akarak gelir, sonda toplu bekleme olmaz.
+
+Neden önemli: ölçülen gerçek dikte süresi ortalama **71 saniye** (vibe coding'de
+uzun prompt söyleniyor). Akış olmadan bitişte ~13 saniye bekleniyordu; akışla
+bekleme son cümleye iniyor.
+
+Kısa diktede davranış değişmez — VAD kesmek için ≥0.6 sn konuşma + ≥0.45 sn
+sessizlik ister, tek cümle bölünmez.
 
 | Ayar | Değer | Ne yapar |
 |---|---|---|
