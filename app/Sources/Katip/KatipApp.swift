@@ -27,6 +27,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Öz-test: mikrofon/tıklama gerektirmeden ASR hattını doğrular.
         //   Katip.app/Contents/MacOS/Katip --selftest ses.wav
+        if let i = CommandLine.arguments.firstIndex(of: "--learn") {
+            let dirs = Array(CommandLine.arguments.dropFirst(i + 1))
+                .filter { !$0.hasPrefix("--") }
+            runLearn(directories: dirs.isEmpty ? ["~/Desktop"] : dirs)
+            return
+        }
+
         if let i = CommandLine.arguments.firstIndex(of: "--fix") {
             let input = CommandLine.arguments.dropFirst(i + 1).joined(separator: " ")
             print(Snippets.apply(to: Replacements.apply(to: input)))
@@ -197,6 +204,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         snippets.target = self
         menu.addItem(snippets)
 
+        let learn = NSMenuItem(title: "Projelerimden terim öğren…",
+                               action: #selector(learnFromProjects), keyEquivalent: "")
+        learn.target = self
+        menu.addItem(learn)
+
         menu.addItem(.separator())
 
         let accessibility = NSMenuItem(
@@ -286,6 +298,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(Replacements.fileURL)
     }
 
+    /// Menüden tetiklenince kendi binary'sini `--learn` ile çalıştırıp sonucu
+    /// Terminal'de gösteriyoruz: çıktı listesi uzun ve kullanıcı gözden geçirmeli.
+    @objc private func learnFromProjects() {
+        let binary = Bundle.main.executableURL?.path ?? ""
+        let script = """
+        tell application "Terminal"
+            activate
+            do script "'\(binary)' --learn ~/Desktop; echo; echo 'Önerileri gözden geçir:'; open '\(Vocabulary.proposalsURL.path)' 2>/dev/null || true"
+        end tell
+        """
+        NSAppleScript(source: script)?.executeAndReturnError(nil)
+    }
+
     @objc private func openSnippets() {
         _ = Snippets.load()
         NSWorkspace.shared.open(Snippets.fileURL)
@@ -368,6 +393,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let leftover = Double(buffer.count) / rate
         print(String(format: "  artık: %.1f sn", leftover))
+        exit(0)
+    }
+
+    /// Projelerden terim öğren, geçmişle karşılaştırıp kural öner.
+    private func runLearn(directories: [String]) {
+        print("• taranıyor: \(directories.joined(separator: ", "))")
+        let found = Vocabulary.scan(directories: directories)
+        guard !found.isEmpty else { print("hiç package.json bulunamadı"); exit(1) }
+
+        // Birden çok projede geçen terim daha güvenilir → önce onlar.
+        let sorted = found.sorted { ($0.value.count, $1.key) > ($1.value.count, $0.key) }
+        let terms = sorted.map(\.key)
+
+        try? terms.joined(separator: "\n").appending("\n")
+            .write(to: Vocabulary.fileURL, atomically: true, encoding: .utf8)
+        print("✔ \(terms.count) terim → \(Vocabulary.fileURL.lastPathComponent)\n")
+
+        print("en yaygın terimler:")
+        for (term, projects) in sorted.prefix(12) {
+            print(String(format: "  %-26s %d proje", (term as NSString).utf8String!, projects.count))
+        }
+
+        let history = History.shared.entries.map(\.text)
+        print("\n• geçmişte \(history.count) dikte var")
+        guard !history.isEmpty else {
+            print("  kural önerisi için gerçek dikte lazım — bir süre kullandıktan sonra tekrar çalıştır")
+            exit(0)
+        }
+
+        let proposals = Vocabulary.proposeRules(terms: terms, transcripts: history)
+        if proposals.isEmpty {
+            print("  yakın-kaçırma bulunamadı")
+        } else {
+            let body = "# Katip — önerilen kurallar (gözden geçir, beğendiğini replacements.txt'e taşı)\n"
+                + proposals.map { "\($0.0) = \($0.1)" }.joined(separator: "\n") + "\n"
+            try? body.write(to: Vocabulary.proposalsURL, atomically: true, encoding: .utf8)
+            print("\n\(proposals.count) kural önerisi → \(Vocabulary.proposalsURL.lastPathComponent)")
+            for (wrong, right) in proposals.prefix(15) { print("  \(wrong) = \(right)") }
+        }
         exit(0)
     }
 

@@ -209,6 +209,30 @@ ateşlenmesi, kaçırılan bir terimden çok daha rahatsız edicidir.
 Sıra: önce **düzeltme**, sonra **genişletme** — tetikleyici yanlış duyulduysa
 önce düzelsin, sonra eşleşsin.
 
+## Projelerinden terim öğrenme
+
+Sağ tık → **Projelerimden terim öğren…** (veya `Katip --learn ~/Desktop`)
+
+Projelerindeki `package.json` bağımlılıklarını tarayıp konuşulan biçime çevirir:
+`@tanstack/react-query` → **TanStack Query**, `maplibre-gl` → **MapLibre GL**.
+Bunlar tam da Whisper'ın bozduğu isimler.
+
+Sonra **geçmişteki gerçek diktelerinle** karşılaştırır: sözlükteki bir terime
+yakın ama tam eşleşmeyen ifadeler bulursa `yanlış = doğru` kuralı **önerir**.
+
+| Dosya | İçerik |
+|---|---|
+| `vocabulary.txt` | Bulunan terimler (birden çok projede geçenler önce) |
+| `onerilen-kurallar.txt` | Önerilen düzeltme kuralları — gözden geçir, beğendiğini `replacements.txt`'e taşı |
+
+> Kurallar **otomatik uygulanmaz.** Yanlış bir kural, kaçırılan bir terimden
+> daha kötüdür — son söz sende.
+
+Neden bu özellik: kıyas testi Katip'in Wispr Flow'a karşı tek gerçek üstünlüğünün
+**kişiselleştirme** olduğunu gösterdi (%71 → %84). Ama elle kural yazmak
+sürtünmeli; bu, o katmanı ölçekliyor. Wispr bunu yapamaz — senin özel repolarını
+göremez.
+
 ## Girişte başlat
 
 Sağ tık → **Girişte başlat**. `SMAppService` kullanıyor (macOS 13+); eski
