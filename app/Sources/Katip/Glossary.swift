@@ -80,11 +80,18 @@ enum Replacements {
         Support.directory.appendingPathComponent("replacements.txt")
     }
 
+    /// Türkçe ekler yüzünden SADECE BAŞTA kelime sınırı arıyoruz.
+    ///
+    /// `\bkomponent\b` yazsaydık "komponent**i**" hiç eşleşmezdi — Türkçe'de
+    /// terimler neredeyse her zaman ek alır (komponenti, store'una, query'de).
+    /// Baş sınırı + serbest son sayesinde kök değişir, ek yerinde kalır:
+    ///   "komponenti"  →  "componenti"
+    ///   "zustant'a"   →  "Zustand'a"
     static func apply(to text: String) -> String {
         var out = text
         for (wrong, right) in load() {
             out = out.replacingOccurrences(
-                of: "\\b\(NSRegularExpression.escapedPattern(for: wrong))\\b",
+                of: "\\b\(NSRegularExpression.escapedPattern(for: wrong))",
                 with: right,
                 options: [.regularExpression, .caseInsensitive])
         }
@@ -110,16 +117,34 @@ enum Replacements {
     private static let defaultFile = """
     # Katip — düzeltme tablosu
     #
-    # Whisper'ın fonetiğe kaçtığı terimleri kural tabanlı düzeltir.
-    # Sıfır gecikme, tam kontrol — sözlüğün kurtaramadığı yerde bu devreye girer.
+    # Whisper'ın senin telaffuzunla çözemediği terimleri kural tabanlı düzeltir.
+    # Sıfır gecikme, tam kontrol — sözlük yönlendirmesinin (~2 sn) yapamadığını
+    # bedavaya yapar. Asıl kaliteyi bu dosya belirler.
     #
-    # Biçim:  yanlış = doğru      (büyük/küçük harf duyarsız, tam kelime eşleşmesi)
-    # Kullandıkça buraya ekle — asıl kaliteyi bu dosya belirleyecek.
+    # Biçim:  yanlış = doğru      (büyük/küçük harf duyarsız)
+    #
+    # Eşleşme SADECE kelime BAŞINDA sınır arar, sonu serbesttir — çünkü Türkçe'de
+    # terimler ek alır. "komponent = component" kuralı "komponenti"yi de düzeltir
+    # ve ek korunur → "componenti".
+    #
+    # Dikkat: sonu serbest olduğu için kısa/yaygın kelimeleri kural yapma.
+    # ("boyut = build" yazarsan "boyutlandırma" da bozulur.)
 
-    Hawk = hook
-    hawk = hook
-    kompanent = component
+    # --- gerçek ölçümden gelen kör noktalar (2026-08-18) ---
     komponent = component
+    kompanent = component
+    zustant = Zustand
+    zul stand = Zustand
+    zustance = Zustand
+    local storage = localStorage
+    lokal storage = localStorage
+    10 stack query = TanStack Query
+    ten stack query = TanStack Query
+    tan stack query = TanStack Query
+
+    # --- diğer ---
+    Hawk = hook
+    refaktör = refactor
     """
 }
 

@@ -27,6 +27,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Öz-test: mikrofon/tıklama gerektirmeden ASR hattını doğrular.
         //   Katip.app/Contents/MacOS/Katip --selftest ses.wav
+        if let i = CommandLine.arguments.firstIndex(of: "--fix") {
+            let input = CommandLine.arguments.dropFirst(i + 1).joined(separator: " ")
+            print(Replacements.apply(to: input))
+            exit(0)
+        }
+
         if CommandLine.arguments.contains("--loginprobe") {
             print("baslangic durum: \(SMAppService.mainApp.status.rawValue) (0=notRegistered 1=enabled 2=requiresApproval 3=notFound)")
             let ok = LoginItem.toggle()
