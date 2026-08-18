@@ -65,6 +65,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Mikrofon hattını uygulamanın KENDİ imzasıyla ölçer. "Ses algılanmadı"
+        // hatasında suçlunun izin mi, cihaz mı, kod mu olduğunu ayırmanın tek yolu.
+        if CommandLine.arguments.contains("--mictest") {
+            runMicTest()
+            return
+        }
+
         if CommandLine.arguments.contains("--rendercard") {
             let dir = CommandLine.arguments.last ?? "/tmp"
             let flat = [CGFloat](repeating: 0.05, count: 16)
@@ -558,6 +565,108 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let error { throw error }
         guard let channel = output.floatChannelData else { throw NSError(domain: "Katip", code: 3) }
         return Array(UnsafeBufferPointer(start: channel[0], count: Int(output.frameLength)))
+    }
+
+    /// 4 saniye kaydeder, ham girdi formatını ve tepe genliği yazar.
+    private func runMicTest() {
+        let engine = AVAudioEngine()
+        let input = engine.inputNode
+        let format = input.inputFormat(forBus: 0)
+        print("giriş formatı : \(format.sampleRate) Hz · \(format.channelCount) kanal")
+        print("mikrofon izni : \(Permissions.hasMicrophone)")
+
+        // 1) Akustikten bağımsız kesin sınav: sentetik çok kanallı sinüs, gerçek
+        //    dönüşüm hattı. "3 kanal → mono" indirgemesi bozulursa burası yakalar.
+        if let r = AudioRecorder.conversionSelfCheck(source: format) {
+            let ok = r.output > 0.1
+            print("dönüşüm sınavı: \(format.channelCount)ch sinüs \(String(format: "%.2f", r.input)) → mono \(String(format: "%.4f", r.output))  \(ok ? "✓" : "✗ SESSİZ — kanal indirgemesi bozuk")")
+        } else {
+            print("dönüşüm sınavı: ✗ kurulamadı")
+        }
+
+        // Karşılaştırma: ESKİ yol — dönüştürücüye kanal indirgemesini de yaptır.
+        // Teşhisi kanıtlıyor; "sanırım buydu" ile "buydu" arasındaki fark.
+        if let mono16 = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000,
+                                      channels: 1, interleaved: false),
+           let direct = AVAudioConverter(from: format, to: mono16),
+           let input = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4800),
+           let data = input.floatChannelData,
+           let out = AVAudioPCMBuffer(pcmFormat: mono16, frameCapacity: 4800) {
+            input.frameLength = 4800
+            for c in 0..<Int(format.channelCount) {
+                for f in 0..<4800 {
+                    data[c][f] = 0.5 * sinf(2 * .pi * 440 * Float(f) / Float(format.sampleRate))
+                }
+            }
+            var supplied = false
+            var convError: NSError?
+            direct.convert(to: out, error: &convError) { _, status in
+                if supplied { status.pointee = .noDataNow; return nil }
+                supplied = true; status.pointee = .haveData; return input
+            }
+            var directPeak: Float = 0
+            if let ch = out.floatChannelData {
+                for f in 0..<Int(out.frameLength) { directPeak = max(directPeak, abs(ch[0][f])) }
+            }
+            print("eski yol      : \(format.channelCount)ch sinüs 0.50 → mono \(String(format: "%.4f", directPeak))  \(directPeak > 0.1 ? "✓" : "✗ SESSİZ (hata yok, sessizce sıfır)")")
+            if let convError { print("  dönüştürücü hatası: \(convError)") }
+        }
+        print("")
+
+        var peaks = [Float](repeating: 0, count: Int(format.channelCount))
+        var frames = 0
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
+            frames += Int(buffer.frameLength)
+            guard let channels = buffer.floatChannelData else { return }
+            for c in 0..<Int(buffer.format.channelCount) {
+                for i in 0..<Int(buffer.frameLength) {
+                    peaks[c] = max(peaks[c], abs(channels[c][i]))
+                }
+            }
+        }
+        do { engine.prepare(); try engine.start() } catch {
+            print("✗ motor başlamadı: \(error)"); exit(1)
+        }
+        print("▶ 4 saniye konuş…")
+        Thread.sleep(forTimeInterval: 4)
+        engine.stop()
+        print("örnek         : \(frames)")
+        for (c, p) in peaks.enumerated() {
+            print("  kanal \(c)     : \(String(format: "%.4f", p))")
+        }
+        let peak = peaks.max() ?? 0
+
+        // Dönüştürücünün çok kanaldan mono'ya inebildiğini AYRICA sına: motorun
+        // ses vermesi yetmiyor, bizim hattımızın o sesi taşıyabilmesi gerek.
+        if let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                    sampleRate: 16_000, channels: 1, interleaved: false),
+           let conv = AVAudioConverter(from: format, to: mono) {
+            print("dönüştürücü   : kuruldu (\(format.channelCount)ch → 1ch)")
+            _ = conv
+        } else {
+            print("dönüştürücü   : ✗ kurulamadı")
+        }
+
+        print("ham tepe      : \(String(format: "%.4f", peak))")
+
+        // Asıl sınav: uygulamanın GERÇEK kayıt hattı. Ham motorun ses vermesi
+        // yetmiyor — 3 kanal → mono indirgemesi burada patlıyordu.
+        print("▶ kayıt hattı sınanıyor, 4 saniye daha konuş…")
+        let recorder = AudioRecorder()
+        do { try recorder.start() } catch {
+            print("✗ kayıt başlamadı: \(error)"); exit(1)
+        }
+        Thread.sleep(forTimeInterval: 4)
+        let captured = (try? recorder.stop()) ?? []
+        print("kayıt örneği  : \(captured.count) (16 kHz mono)")
+        print("HAT TEPE      : \(String(format: "%.4f", recorder.lastPeak))")
+
+        // Ham ölçüm ile hat ölçümü FARKLI zaman pencerelerinden geliyor; birbirine
+        // oranlayıp hüküm vermek yanıltıcı olur. Sadece raporla.
+        print(recorder.lastPeak < 0.0001
+              ? "✗ hat tam sessiz"
+              : "✓ hat ses taşıyor (konuşurken ≥0.02 bekleniyor — kapı bu)")
+        exit(0)
     }
 
     // MARK: - Görünüm

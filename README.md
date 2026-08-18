@@ -71,6 +71,37 @@ Fn/🌐 listede yok: macOS'un kendi katip kısayolu onu sistem seviyesinde kapı
 Kayıt ilk basışta **hemen** başlar; bas-tut ile çift-bas ayrımı bırakışta yapılır
 (250 ms / 400 ms eşikleri) — beklemek ilk hecenin kaybı olurdu.
 
+### Ses hattı: kanal indirgemesini AVAudioConverter'a bırakma
+
+MacBook'un dahili mikrofonu bazen **3 kanallı bir dizi** olarak görünüyor (dizi
+modu; ne zaman devreye girdiği bize bağlı değil). Bu olduğunda
+`AVAudioConverter(from: 3ch, to: 1ch)` **kuruluyor, hata vermiyor ve sessizce
+sıfır üretiyor.** Dışarıdan görünen tek belirti "Ses algılanmadı — mikrofonu
+kontrol et"; mikrofon ise gayet çalışıyor.
+
+Kanal indirgemesi artık elle yapılıyor (dizinin ilk kanalı alınıyor);
+dönüştürücüye yalnızca örnekleme hızı işi kalıyor:
+
+```
+48 kHz · 3 kanal  ──downmix(ch0)──▶  48 kHz · mono  ──AVAudioConverter──▶  16 kHz · mono
+```
+
+Kanalları **ortalamıyoruz**: dizideki mikrofonlar arasındaki faz farkı sinyali
+kısmen iptal edebilir. Tek mikrofon sinyali her koşulda güvenli.
+
+`Katip --mictest` bu hattı uçtan uca sınar ve ikisini yan yana gösterir:
+
+```
+dönüşüm sınavı: 3ch sinüs 0.50 → mono 0.5000  ✓
+eski yol      : 3ch sinüs 0.50 → mono 0.0000  ✗ SESSİZ (hata yok, sessizce sıfır)
+```
+
+> [!warning] Bunu hoparlörden ses çalarak test edemezsin.
+> macOS, kendi çaldığı sesi mikrofon girdisinden **iptal ediyor**. `say` ile
+> yapılan denemede hem ham hem işlenmiş ölçüm gürültü tabanında kaldı ve
+> düzeltme çalışmıyor gibi göründü. Doğru sınav akustikten bağımsız olanı:
+> sentetik sinüsü gerçek donanım formatında üretip hattan geçirmek.
+
 **Yüzen kart:** masaüstünde duran, sürüklenebilir bir gösterge. Tek bir "ada"
 gibi davranır — **yer değiştirmez, şekil değiştirir.** Beş biçim var:
 
