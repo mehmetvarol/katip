@@ -1,0 +1,43 @@
+# Teknik sözlük — faster-whisper `hotwords` parametresine beslenir.
+#
+# ⚠️ SIRALAMA ÖNEMLİ — ve sezgiye ters:
+# hotwords ~224 token bütçesine tabi ve bütçe aşılırsa **SONDAN kırpılır**:
+#     hotwords_tokens[: self.max_length // 2 - 1]     ← ilk N token tutulur
+#     (faster_whisper/transcribe.py::get_prompt)
+# Yani **en kritik terimler BAŞA yazılmalı.** Sondakiler sessizce düşer.
+#
+# NOT: openai/whisper'ın `initial_prompt`'u TERSİ davranır — orada
+# prompt_tokens[-(n_ctx // 2 - 1):] ile SON token'lar tutulur. WhisperKit'in
+# `promptTokens`'ına taşırken listeyi TERS ÇEVİR (2026-08-17: kaynaktan doğrulandı).
+#
+# Liste senin gerçek stack'inden: Next.js/React/TS/Tailwind, TanStack Query,
+# Zustand, TeslaInfo (Fleet API, Leaflet), React Native + SSE, ESP32/CAN bus/
+# Home Assistant, Claude Code/MCP, Shopify.
+#
+# '#' ile başlayan satırlar yok sayılır. Terimler virgülle birleştirilir.
+# bench.py çalışırken gerçek token sayısını yazdırır — bütçeyi oradan takip et.
+
+
+# --- 1. ÖNCELİK: nadir/özel adlar (Whisper bunları en çok bozuyor) ---
+Zustand, TanStack Query, Turbopack, Netlify, Leaflet, Vitest, Fleet API
+ESP32, CAN bus, TPMS, MQTT, Home Assistant, Shelly, Raspberry Pi
+Claude Code, MCP, Shopify, Next.js, React Native, App Router
+
+# --- 2. ÖNCELİK: çok kelimeli teknik kalıplar ---
+prop drilling, optimistic update, stale time, reverse geocode
+exponential backoff, error boundary, custom hook, lazy load, bundle size
+loading state, unit test, test coverage, pull request, code review
+environment variable, server side, sub agent, rate limit
+
+# --- 3. ÖNCELİK: tek kelimelik terimler (bütçe biterse buranın SONU düşer) ---
+#
+# Bilinçli olarak kısa: duman testinde refactor / deploy / endpoint / rate limit
+# gibi yaygın terimler hotwords OLMADAN da doğru çıktı. Bütçeyi Whisper'ın zaten
+# bildiği kelimelere harcamanın anlamı yok — 1. ve 2. öncelik korunsun diye
+# buradan responsive/mobile/layout/render/crash/backup/production gibi
+# "zaten geçen" kelimeler çıkarıldı. Cümlelerde geçiyorlar; ipucu olmadan
+# hayatta kalıp kalmadıklarını görmek de bir ölçüm.
+component, props, state, hook, context, refactor, endpoint, route, proxy
+token, OAuth, refresh, cache, invalidate, mutation, query, migration, database
+build, deploy, commit, push, type, interface, dependency, ESLint, SSE
+memo, virtualize, debounce, skeleton, persist, localStorage

@@ -1,0 +1,5 @@
+.venv/
+audio/*.wav
+results/*
+!results/.gitkeep
+__pycache__/

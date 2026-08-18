@@ -1,0 +1,13 @@
+# Derleme çıktıları
+.build/
+*.app/
+DerivedData/
+
+# P0 tezgâhı: venv ve indirilen modeller (yüzlerce MB)
+p0-bench/.venv/
+p0-bench/__pycache__/
+p0-bench/audio/
+p0-bench/results/
+*.wav
+
+.DS_Store

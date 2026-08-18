@@ -1,0 +1,59 @@
+# Katip P0 — okunacak cümleler
+#
+# Her satır bir test cümlesi. İngilizce teknik terimleri `backtick` içine al.
+# Backtick'ler iki işe yarıyor:
+#   1. referans metin  → backtick'ler sökülerek elde edilir (WER için)
+#   2. beklenen terim listesi → backtick içindekiler (terim korunum oranı için)
+#
+# Cümleler senin gerçek stack'ine göre yazıldı: Next.js 16 / React 19 / TS /
+# Tailwind 4 / TanStack Query / Zustand, TeslaInfo (Fleet API, telemetri, Leaflet),
+# React Native + SSE, ESP32/CAN bus/Home Assistant, Claude Code/MCP, Shopify teması.
+#
+# ÜÇ UZUNLUK BANDI VAR ve bu bilinçli:
+# kısa cümleler kaliteyi olduğundan İYİ gösterir. Vibe coding'de asıl yaptığın şey
+# ajana uzun, noktalamasız, kendini düzelten prompt söylemek — asıl zor durum o.
+# En anlamlı sinyal C bandından gelecek.
+#
+# Noktalama yok, çünkü zaten konuşurken noktalama yapmıyorsun ve ölçüm
+# normalizasyonu noktalamayı zaten atıyor. Doğal konuş, ezberden okuma.
+#
+# '#' ile başlayan satırlar ve boş satırlar yok sayılır.
+# NOT: id'ler satır sırasından türüyor — araya satır eklersen sonrakilerin
+# numarası kayar, o cümleleri yeniden kaydetmen gerekir (`--only` ile).
+
+
+# ─── A) KISA — hızlı katip, tek komut ────────────────────────────────────────
+
+şu `component`'i biraz `refactor` edelim çok şişti
+`Zustand` `store`'una `persist` ekle `localStorage`'da kalsın
+şu `type`'ı `interface`'e çevir daha okunur olur
+`commit` mesajını düzelt sonra `push` edebilirsin
+`Vitest` ile birkaç `unit test` yazalım `coverage` çok düşük
+bu `endpoint`'i `server side`'a taşı `token` `client`'a düşmesin
+`Leaflet` haritası `mobile`'da `responsive` değil `layout` bozuluyor
+`Netlify`'a `deploy` etmeden önce yerelde bir `build` alalım
+
+
+# ─── B) ORTA — normal iş cümlesi ─────────────────────────────────────────────
+
+`TanStack Query`'de `stale time`'ı artıralım gereksiz yere `refetch` oluyor
+`Fleet API`'den gelen `telemetri` verisini `cache`'leyelim her seferinde `request` atmasın
+`error boundary` ekleyelim bir yerde patlarsa bütün uygulama `crash` etmesin
+`ESP32`'den `CAN bus` üzerinden gelen `TPMS` verisini `MQTT`'ye basalım
+`Home Assistant`'ta `Shelly` rölesi için bir `automation` yazalım
+`Claude Code`'da bir `sub agent` tanımlayalım `code review` yapsın `ultrathink` ile
+`Shopify` temasında `checkout` sayfası `mobile`'da kayıyor `CSS`'i bir gözden geçir
+`bundle size`'ı düşürmek için şu ağır `component`'leri `lazy load` yapalım
+
+
+# ─── C) UZUN — ajana prompt söylerken gerçekten böyle konuşuyorsun ───────────
+#     (asıl ölçüm bandı: noktalamasız, bağlaçlı, kendini düzelten)
+
+şöyle yapalım her `mutation` sonrası `cache`'i `invalidate` edelim ama bir de `optimistic update` olsun ki `UI` beklemesin kullanıcı takıldığını sanmasın
+bak şu `component` iyice şişti bunu bir `custom hook`'a çıkaralım `state` yönetimi de `Zustand`'a geçsin böylece `prop drilling` de kalmamış olur
+`Next.js 16` `App Router`'da `Turbopack` ile `build` patlıyor bir bakar mısın `dependency` çakışması mı yoksa `ESLint` uyumsuzluğu mu anlayamadım
+`Fleet API`'ye giden `proxy` `route`'unda `OAuth` `token`'ı `refresh` etmiyor süresi dolunca `401` alıyoruz onu bir düzeltelim
+`React Native` tarafında `SSE` bağlantısı uygulama arka plana düşünce kopuyor bir `reconnect` mekanizması kuralım `exponential backoff` ile olsun
+şuna bir bakar mısın `Panel` sekmesindeki `chart` var ya `data` çoğalınca `render` süresi uzuyor bunu `virtualize` edelim ya da en azından `memo`'ya alalım bir de `loading state` için `skeleton` koyalım şu an bomboş görünüyor
+`Aktivite` sekmesinde `reverse geocode` çok fazla `request` atıyor bunu bir `debounce`'a alalım ya da sonuçları `localStorage`'da tutalım aynı koordinat için tekrar sormasın
+`migration`'ı `production`'da çalıştırmadan önce bir `backup` alalım sonra `environment variable`'ları da güncellemeyi unutma yoksa `database` bağlantısı kopar
