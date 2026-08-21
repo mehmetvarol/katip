@@ -223,19 +223,63 @@ final class HUDPanel: NSPanel {
 
     /// 1:1 takip. Kartın kavrandığı NOKTA korunuyor — merkeze zıplatmak
     /// yanılsamayı anında bozar.
+    ///
+    /// Kenarda LASTİK BANT var, sert duvar değil. Sert durdurmak "dondu" gibi
+    /// okunuyor; artan direnç "cevap veriyor ama burada bir şey yok" diyor.
     func continueDrag(to screenPoint: NSPoint) {
         guard dragging, let grab = grabOffset else { return }
-        let origin = NSPoint(x: screenPoint.x - grab.x, y: screenPoint.y - grab.y)
-        setFrameOrigin(origin)
-        dragSamples.append((origin, CACurrentMediaTime()))
+        let wanted = NSPoint(x: screenPoint.x - grab.x, y: screenPoint.y - grab.y)
+        let shown = NSScreen.main.map {
+            Self.resist(wanted, size: frame.size, within: $0.visibleFrame)
+        } ?? wanted
+        setFrameOrigin(shown)
+
+        // Hız, KISITLANMAMIŞ konumdan ölçülüyor. Kartın gittiği yerden ölçmek
+        // yanlış: lastik bant örnekleri sıkıştırdığı için kenara doğru atılan
+        // bir fiske olduğundan yavaş görünüyor. Ölçmek istediğimiz şey elin
+        // hareketi, kartın kısıtlanmış cevabı değil. (`--dragprobe` bu
+        // regresyonu düzeltmeden önce yakaladı.)
+        dragSamples.append((wanted, CACurrentMediaTime()))
         if dragSamples.count > 10 { dragSamples.removeFirst() }
+    }
+
+    /// Kenarın ötesinde ne kadar ilerlenebileceğinin tavanı. Formül sonsuz
+    /// aşımda bu değere yakınsıyor, yani kart ekran kenarını en fazla bu kadar
+    /// geçebilir.
+    private static let resistLimit: CGFloat = 60
+
+    /// Sınırın ötesinde ilerlemeye artan direnç uygular.
+    ///
+    /// SADECE estetik değil, kartın kaybolmasını önleyen ŞART: kart ekranın
+    /// tamamen dışına çıkarsa `NSView.displayLink` ateşlenmeyi bırakıyor
+    /// (bağlı olduğu ekran kalmıyor) ve onu geri getirecek yay HİÇ ÇALIŞAMIYOR.
+    /// Kart orada kilitli kalıyordu — kullanıcı "köşeye savurunca kayboluyor"
+    /// diye bildirdi, `--cornerprobe` ile (1512, 1049) konumunda, ekranın
+    /// tamamen dışında donmuş hâlde yakalandı.
+    static func resist(_ origin: NSPoint, size: NSSize, within visible: NSRect) -> NSPoint {
+        func band(_ overshoot: CGFloat) -> CGFloat {
+            let d = resistLimit
+            return (overshoot * d * 0.55) / (d + 0.55 * abs(overshoot))
+        }
+        func axis(_ value: CGFloat, _ low: CGFloat, _ high: CGFloat) -> CGFloat {
+            if value < low { return low - band(low - value) }
+            if value > high { return high + band(value - high) }
+            return value
+        }
+        return NSPoint(
+            x: axis(origin.x, visible.minX, visible.maxX - size.width),
+            y: axis(origin.y, visible.minY, visible.maxY - size.height))
     }
 
     private var grabOffset: NSPoint?
 
     private func animate(to target: NSRect, damping: CGFloat, response: TimeInterval,
                          velocity: NSPoint = .zero) {
-        guard !reduceMotion else {
+        // Pencere hiçbir ekranla kesişmiyorsa display link ateşlenmez ve yay
+        // hiç adım atamaz — animasyonla kurtarmak imkânsız. Doğrudan yerleştir.
+        let offScreen = !NSScreen.screens.contains { $0.visibleFrame.intersects(frame) }
+        guard !reduceMotion, !offScreen else {
+            if offScreen { Trace.log("kart ekran dışındaydı — animasyonsuz geri alındı") }
             setFrame(target, display: true)
             invalidateShadow()
             savePosition()

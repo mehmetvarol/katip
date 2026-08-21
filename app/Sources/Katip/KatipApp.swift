@@ -100,12 +100,95 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // GERÇEK kod yolunda köşeye savurma. --boundsprobe yalnızca yay
+        // matematiğini sınıyor; buradaki dizi setDragging → applyHover →
+        // setMode → resize etkileşimini de içeriyor.
+        if CommandLine.arguments.contains("--cornerprobe") {
+            let visible = NSScreen.main?.visibleFrame ?? .zero
+            let panel = HUDPanel()
+            panel.show()
+            panel.setFrameOrigin(NSPoint(x: visible.maxX - 400, y: visible.maxY - 300))
+            let startFrame = panel.frame
+            print("ekran \(visible)  ·  başlangıç \(startFrame.origin)")
+
+            // Sağ-üst köşeye sert çapraz savuruş (~2800 px/sn).
+            let speed: CGFloat = 2000, step = 1.0 / 60.0
+            let o = startFrame.origin
+            panel.beginDrag(at: NSPoint(x: o.x, y: o.y))
+            for i in 1...12 {
+                let deadline = Date().addingTimeInterval(step)
+                while Date() < deadline { }
+                let d = speed * CGFloat(Double(i) * step)
+                panel.continueDrag(to: NSPoint(x: o.x + d, y: o.y + d))
+            }
+            panel.setDragging(false)
+
+            var minX = CGFloat.infinity, maxRight: CGFloat = 0
+            var minY = CGFloat.infinity, maxTop: CGFloat = 0
+            let t0 = CACurrentMediaTime()
+            Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { timer in
+                let f = panel.frame
+                minX = min(minX, f.minX); maxRight = max(maxRight, f.maxX)
+                minY = min(minY, f.minY); maxTop = max(maxTop, f.maxY)
+                guard CACurrentMediaTime() - t0 > 2.0 else { return }
+                timer.invalidate()
+
+                let f2 = panel.frame
+                print(String(format: "yol sınırları  x %.0f…%.0f (ekran %.0f…%.0f)",
+                             minX, maxRight, visible.minX, visible.maxX))
+                print(String(format: "               y %.0f…%.0f (ekran %.0f…%.0f)",
+                             minY, maxTop, visible.minY, visible.maxY))
+                print(String(format: "son konum      (%.0f, %.0f) boyut %.0f×%.0f",
+                             f2.minX, f2.minY, f2.width, f2.height))
+                let outside = minX < visible.minX - 1 || maxRight > visible.maxX + 1
+                            || minY < visible.minY - 1 || maxTop > visible.maxY + 1
+                let landedInside = visible.insetBy(dx: -1, dy: -1).contains(f2)
+                print(outside ? "\n✗ YOL ekran dışına taştı" : "\n✔ yol hep ekran içinde")
+                print(landedInside ? "✔ ekran içinde durdu" : "✗ EKRAN DIŞINDA DURDU")
+                exit(outside || !landedInside ? 1 : 0)
+            }
+            return
+        }
+
+        // Sert fiskede kart ekran dışına çıkıyor mu? Yayın taşması hedefi
+        // aşabilir; hedef ekran içinde olsa bile YOL ekran dışına sapabilir.
+        if CommandLine.arguments.contains("--boundsprobe") {
+            let visible = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1512, height: 949)
+            let card = NSRect(x: 1150, y: 700, width: 112, height: 26)
+            print("ekran \(Int(visible.width))×\(Int(visible.height)) · kart (\(Int(card.minX)),\(Int(card.minY))) sağ-üst köşeye yakın\n")
+
+            for speed in [800, 1500, 3000, 6000] as [CGFloat] {
+                let v = NSPoint(x: speed * 0.7, y: speed * 0.7)   // çapraz, köşeye
+                let target = HUDPanel.landingOrigin(frame: card, visible: visible, velocity: v)
+                var sx = Spring(damping: 0.8, response: 0.4, value: card.minX, target: target.x, velocity: v.x)
+                var sy = Spring(damping: 0.8, response: 0.4, value: card.minY, target: target.y, velocity: v.y)
+
+                var worstOut: CGFloat = 0
+                var t = 0.0
+                while t < 2.0 {
+                    sx.step(1/120); sy.step(1/120); t += 1/120
+                    let outX = max(visible.minX - sx.value, sx.value + card.width - visible.maxX, 0)
+                    let outY = max(visible.minY - sy.value, sy.value + card.height - visible.maxY, 0)
+                    worstOut = max(worstOut, max(outX, outY))
+                }
+                let verdict = worstOut < 1 ? "ekran içinde" :
+                              worstOut > card.width ? "TAMAMEN KAYBOLUYOR" : "kısmen taşıyor"
+                print(String(format: "  %5.0f px/sn → hedef (%5.0f,%5.0f)  en fazla %6.1f px dışarı  %@",
+                             speed, target.x, target.y, worstOut, verdict))
+            }
+            exit(0)
+        }
+
         // Sürükleme hızı GERÇEKTEN ölçülüyor mu? Şikâyetin ("savurunca
         // akmıyor") en olası sebebi hızın hiç yakalanmaması — o zaman her
         // bırakma "yavaş" sayılır ve fiske diye bir şey olmaz.
         if CommandLine.arguments.contains("--dragprobe") {
             let panel = HUDPanel()
             panel.show()
+            // Ekranın SOLUNA al: sağa doğru 400 px sürükleyecek yer olsun,
+            // yoksa lastik bant devreye girip ölçümü kendisi bozar.
+            let visible = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1512, height: 949)
+            panel.setFrameOrigin(NSPoint(x: visible.minX + 40, y: visible.midY))
             let startX = panel.frame.minX, y = panel.frame.minY
 
             // 1200 px/sn hızla 20 kare sağa sürükle (16.7 ms aralık).
