@@ -53,7 +53,12 @@ final class HUDPanel: NSPanel {
         backgroundColor = .clear
         isOpaque = false
         hasShadow = true
-        isMovableByWindowBackground = true
+        // KAPALI: sürüklemeyi kendimiz yapıyoruz (CardView.mouseDragged).
+        // AppKit'in sürüklemesi kendi olay döngüsünü çalıştırıyor ve pencere
+        // hareketini bize hiç bildirmiyor — bırakma hızını ölçmek imkânsız,
+        // dolayısıyla fiske hiç algılanamıyordu. Ayrıca kendi sürüklememiz
+        // kavrama noktasını koruyor: kart parmağın altından kaymıyor.
+        isMovableByWindowBackground = false
         hidesOnDeactivate = false
         acceptsMouseMovedEvents = true   // düğme üstü vurgusu için
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
@@ -74,6 +79,7 @@ final class HUDPanel: NSPanel {
     /// kayıt/çeviri sürerken fare nerede olursa olsun listening kazanır, yoksa
     /// kart konuşurken fareyle oynanıp kapanabilirdi.
     func update(state: DictationController.State, level: Float) {
+        defer { if card.wantsFrames { startTicking() } }
         card.apply(state: state, level: level)
         setMode(naturalMode(for: state))
     }
@@ -148,9 +154,8 @@ final class HUDPanel: NSPanel {
             // Hareket hâlindeki kart yakalandı: yayı ANINDA bırak. Kullanıcıyla
             // yarışan bir animasyon, akıcılığı bozan tek şeydir.
             stopAnimating()
-            dragSamples.removeAll()
-            startTicking()          // sürüklerken hız örneklemek için
         } else {
+            grabOffset = nil
             let velocity = releaseVelocity()
             dragSamples.removeAll()
             hovering = pointerInside
@@ -208,6 +213,26 @@ final class HUDPanel: NSPanel {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 
+    /// Sürükleme başlıyor: kavrama noktasını sakla, yayı bırak.
+    func beginDrag(at screenPoint: NSPoint) {
+        stopAnimating()
+        dragSamples.removeAll()
+        grabOffset = NSPoint(x: screenPoint.x - frame.minX, y: screenPoint.y - frame.minY)
+        setDragging(true)
+    }
+
+    /// 1:1 takip. Kartın kavrandığı NOKTA korunuyor — merkeze zıplatmak
+    /// yanılsamayı anında bozar.
+    func continueDrag(to screenPoint: NSPoint) {
+        guard dragging, let grab = grabOffset else { return }
+        let origin = NSPoint(x: screenPoint.x - grab.x, y: screenPoint.y - grab.y)
+        setFrameOrigin(origin)
+        dragSamples.append((origin, CACurrentMediaTime()))
+        if dragSamples.count > 10 { dragSamples.removeFirst() }
+    }
+
+    private var grabOffset: NSPoint?
+
     private func animate(to target: NSRect, damping: CGFloat, response: TimeInterval,
                          velocity: NSPoint = .zero) {
         guard !reduceMotion else {
@@ -244,27 +269,32 @@ final class HUDPanel: NSPanel {
         displayLink?.isPaused = false
     }
 
+    /// Kare temposu ölçümü (`--jankprobe`). Takılma şikâyetini gözle değil
+    /// sayıyla teşhis etmenin tek yolu.
+    var frameLog: [(dt: Double, work: Double)]?
+
     @objc private func tick(_ link: CADisplayLink) {
         let now = CACurrentMediaTime()
         let dt = now - lastTick
         lastTick = now
 
-        // Sürüklerken pencere AppKit'in: YAZMA, sadece hızı örnekle.
-        if dragging {
-            dragSamples.append((frame.origin, now))
-            if dragSamples.count > 8 { dragSamples.removeFirst() }
-            return
-        }
+        // Sürüklerken çerçeveyi fare sürüyor; yay karışmaz.
+        if dragging { return }
+
+        if card.wantsFrames { card.advance(dt) }
 
         guard var s = springs else {
-            link.isPaused = true          // iş yokken 120 Hz'de dönmenin anlamı yok
+            // İş yokken 120 Hz'de dönmenin anlamı yok.
+            link.isPaused = !card.wantsFrames
             return
         }
         s.x.step(dt); s.y.step(dt); s.w.step(dt); s.h.step(dt)
         springs = s
 
+        let workStart = CACurrentMediaTime()
         setFrame(NSRect(x: s.x.value, y: s.y.value, width: s.w.value, height: s.h.value),
                  display: true)
+        if frameLog != nil { frameLog?.append((dt, CACurrentMediaTime() - workStart)) }
 
         if s.x.isSettled && s.y.isSettled && s.w.isSettled && s.h.isSettled {
             springs = nil
@@ -279,7 +309,7 @@ final class HUDPanel: NSPanel {
     /// Tek bir kareye bakmak gürültülü — parmak/fare titremesi hızı savuruyor.
     /// En az 30 ms'lik bir pencereye yayılan örnekleri kullanıyoruz; o kadar
     /// veri yoksa hız yok sayılıyor (yavaş bırakma zaten momentum taşımaz).
-    private func releaseVelocity() -> NSPoint {
+    func releaseVelocity() -> NSPoint {
         guard let last = dragSamples.last else { return .zero }
         guard let first = dragSamples.first(where: { last.time - $0.time <= 0.12 }),
               last.time - first.time >= 0.03 else { return .zero }
@@ -287,6 +317,12 @@ final class HUDPanel: NSPanel {
         let dt = CGFloat(last.time - first.time)
         return NSPoint(x: (last.point.x - first.point.x) / dt,
                        y: (last.point.y - first.point.y) / dt)
+    }
+
+    /// Sonda için: kartı verilen hızla fırlat.
+    func debugFling(to origin: NSPoint, velocity: NSPoint) {
+        animate(to: NSRect(origin: origin, size: frame.size),
+                damping: 0.8, response: 0.4, velocity: velocity)
     }
 
     // MARK: - Kenara yapışma
@@ -305,6 +341,7 @@ final class HUDPanel: NSPanel {
         // Fiske varsa hafif aşma (fiziksel his), yavaş bırakmada yok — hareketi
         // başlatan jest momentum taşımıyorsa zıplamak yapay duruyor.
         let flicked = hypot(velocity.x, velocity.y) > Self.flickVelocity
+        Trace.log("bırakma hızı \(Int(hypot(velocity.x, velocity.y))) px/sn — \(flicked ? "FİSKE" : "yavaş")")
         animate(to: NSRect(origin: origin, size: frame.size),
                 damping: flicked ? 0.8 : 1.0, response: 0.4, velocity: velocity)
     }
@@ -396,7 +433,9 @@ final class HUDPanel: NSPanel {
         view.mode = mode
         if ticks > 0 {
             let state: DictationController.State = mode == .listening ? .recording : .transcribing
-            for _ in 0..<ticks { view.apply(state: state, level: level) }
+            view.apply(state: state, level: level)
+            // Kareyi ELLE ilerlet: artık ekran saatiyle sürülüyor, burada ekran yok.
+            for _ in 0..<ticks { view.advance(1.0 / 60) }
         } else {
             view.debugLevels = levels
             view.apply(state: mode == .listening ? .recording : .idle, level: 0)
@@ -521,8 +560,12 @@ private final class CardView: NSView {
     // tıklama sayılamaz.
     override func mouseDown(with event: NSEvent) {
         dragOrigin = window?.frame.origin
-        (window as? HUDPanel)?.setDragging(true)
+        (window as? HUDPanel)?.beginDrag(at: NSEvent.mouseLocation)
         super.mouseDown(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        (window as? HUDPanel)?.continueDrag(to: NSEvent.mouseLocation)
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -542,18 +585,38 @@ private final class CardView: NSView {
 
     // MARK: Seviye
 
+    /// Ses seviyesini ve durumu al. ANİMASYONU İLERLETMEZ.
+    ///
+    /// Ayrım şart: bu 30 Hz'lik bir zamanlayıcıdan geliyor (mikrofon seviyesi
+    /// için fazlasıyla yeterli), animasyon ise ekranla senkron ilerlemeli.
+    /// İkisi birleşikken dalga 30 Hz'de takılıyordu — 120 Hz ekranda dörtte
+    /// bir çözünürlük, üstelik `Timer` ekranla senkron olmadığı için düzensiz.
     func apply(state: DictationController.State, level: Float) {
         self.state = state
-        if let debugLevels { levels = debugLevels; painter.needsDisplay = true; return }
+        self.inputLevel = level
+        if let debugLevels { levels = debugLevels; painter.needsDisplay = true }
+    }
+
+    /// Ekranın kendi saatiyle bir kare ilerlet. `HUDPanel`'in display link'i
+    /// çağırıyor.
+    ///
+    /// Bütün hızlar SANİYE cinsinden — kare hızından bağımsız. Eskiden kare
+    /// başına sabit artışlardı (`phase += 0.34`), yani animasyonun hızı ekranın
+    /// kare hızına bağlıydı: 120 Hz'de dört kat hızlı akacaktı.
+    func advance(_ dt: TimeInterval) {
+        guard debugLevels == nil else { return }
+        let dt = CGFloat(min(dt, 1.0 / 30))
 
         switch state {
         case .recording, .locked:
             isSettled = false
             // Ataklı zarf: sese HIZLI yüksel, yavaş in. Simetrik yumuşatma
             // konuşmanın vuruşunu ezip animasyonu cansız gösteriyordu.
-            let raw = min(1, CGFloat(level) * 7)
-            energy += (raw - energy) * (raw > energy ? 0.55 : 0.16)
-            phase += 0.34
+            // Zaman sabitleri saniye: yükselişte 20 ms, inişte 110 ms.
+            let raw = min(1, CGFloat(inputLevel) * 7)
+            let tau: CGFloat = raw > energy ? 0.020 : 0.110
+            energy += (raw - energy) * (1 - exp(-dt / tau))
+            phase += Self.waveSpeed * dt
             shape { index, x in
                 // Ortada yüksek, uçlarda sönen siluet × soldan sağa akan dalga.
                 let envelope = 0.30 + 0.70 * sin(.pi * x)
@@ -563,7 +626,7 @@ private final class CardView: NSView {
 
         case .transcribing:
             isSettled = false
-            phase += 0.22
+            phase += Self.pulseSpeed * dt
             // Soldan sağa geçen tek bir kabarcık — "çalışıyor" der, seviye taklidi
             // yapmaz. Mikrofon kapalıyken sahte ses dalgası göstermek yalan olurdu.
             let head = (phase * 0.09).truncatingRemainder(dividingBy: 1.5) - 0.25
@@ -574,12 +637,30 @@ private final class CardView: NSView {
 
         default:
             energy = 0
+            // Sönme de zaman tabanlı: saniyede ~e^-9, eski 30 Hz'deki 0.74/kare
+            // ile aynı his.
+            let decay = exp(-9 * dt)
             for index in levels.indices {
-                levels[index] = max(Self.floor, levels[index] * 0.74)
+                levels[index] = max(Self.floor, levels[index] * decay)
             }
             isSettled = levels.allSatisfy { $0 <= Self.floor + 0.001 }
         }
         painter.needsDisplay = true
+    }
+
+    /// Dalganın akış hızı, radyan/saniye. Eski 30 Hz × 0.34 rad/kare ile aynı.
+    private static let waveSpeed: CGFloat = 0.34 * 30
+    private static let pulseSpeed: CGFloat = 0.22 * 30
+
+    private var inputLevel: Float = 0
+
+    /// Ekran karesi istiyor mu? Yalnızca hareketli durumlarda — boşta display
+    /// link'i döndürmenin anlamı yok.
+    var wantsFrames: Bool {
+        switch state {
+        case .recording, .locked, .transcribing: true
+        default: !isSettled
+        }
     }
 
     // MARK: - Yerleşim

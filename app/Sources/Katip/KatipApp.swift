@@ -100,6 +100,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Sürükleme hızı GERÇEKTEN ölçülüyor mu? Şikâyetin ("savurunca
+        // akmıyor") en olası sebebi hızın hiç yakalanmaması — o zaman her
+        // bırakma "yavaş" sayılır ve fiske diye bir şey olmaz.
+        if CommandLine.arguments.contains("--dragprobe") {
+            let panel = HUDPanel()
+            panel.show()
+            let startX = panel.frame.minX, y = panel.frame.minY
+
+            // 1200 px/sn hızla 20 kare sağa sürükle (16.7 ms aralık).
+            let speed: CGFloat = 1200, step = 1.0 / 60.0
+            panel.beginDrag(at: NSPoint(x: startX, y: y))
+            var elapsed = 0.0
+            for i in 1...20 {
+                elapsed = Double(i) * step
+                // Gerçek zaman damgası şart: örnekler CACurrentMediaTime kullanıyor.
+                let deadline = Date().addingTimeInterval(step)
+                while Date() < deadline { }
+                panel.continueDrag(to: NSPoint(x: startX + speed * CGFloat(elapsed), y: y))
+            }
+            let v = panel.releaseVelocity()
+            let measured = hypot(v.x, v.y)
+            let error = abs(measured - speed) / speed * 100
+            print(String(format: "gerçek hız   %.0f px/sn", speed))
+            print(String(format: "ölçülen hız  %.0f px/sn  (sapma %%%.1f)", measured, error))
+            print("fiske eşiği  \(Int(HUDPanel.flickVelocity)) px/sn → \(measured > HUDPanel.flickVelocity ? "FİSKE algılandı" : "fiske ALGILANMADI")")
+            let ok = error < 10 && measured > HUDPanel.flickVelocity
+            print(ok ? "\n✔ hız ölçümü sağlam" : "\n✗ hız ölçümü BOZUK — fırlatma çalışmaz")
+            exit(ok ? 0 : 1)
+        }
+
+        // Takılma teşhisi: uzun bir hareket boyunca kare temposunu ölçer.
+        // "Akmıyor" şikâyetinin sebebi kare atlama mı, yoksa kare başına iş
+        // süresi mi — gözle ayırt edilemez, sayıyla ayırt edilir.
+        if CommandLine.arguments.contains("--jankprobe") {
+            let panel = HUDPanel()
+            panel.show()
+            panel.frameLog = []
+            let t0 = CACurrentMediaTime()
+            panel.debugFling(to: NSPoint(x: 900, y: 500), velocity: NSPoint(x: 1400, y: 0))
+
+            Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { timer in
+                guard CACurrentMediaTime() - t0 > 1.2 else { return }
+                timer.invalidate()
+                let log = panel.frameLog ?? []
+                guard log.count > 4 else { print("✗ hiç kare üretilmedi"); exit(1) }
+
+                let dts = log.map { $0.dt * 1000 }
+                let works = log.map { $0.work * 1000 }
+                let budget = 1000.0 / 60                       // 16.7 ms
+                let dropped = dts.filter { $0 > budget * 1.5 }.count
+
+                func pct(_ xs: [Double], _ p: Double) -> Double {
+                    let s = xs.sorted(); return s[min(s.count - 1, Int(Double(s.count) * p))]
+                }
+                print("kare sayısı \(log.count)")
+                print(String(format: "kare aralığı  ort %.1f ms · p50 %.1f · p95 %.1f · en kötü %.1f",
+                             dts.reduce(0,+) / Double(dts.count), pct(dts, 0.5), pct(dts, 0.95), dts.max()!))
+                print(String(format: "setFrame işi  ort %.2f ms · p95 %.2f · en kötü %.2f",
+                             works.reduce(0,+) / Double(works.count), pct(works, 0.95), works.max()!))
+                print(String(format: "atlanan kare  %d / %d  (%%%.0f)", dropped, log.count,
+                             Double(dropped) / Double(log.count) * 100))
+                print(dropped * 10 <= log.count ? "\n✔ tempo düzgün" : "\n✗ TAKILIYOR")
+                exit(0)
+            }
+            return
+        }
+
         // Fiske → iniş noktası. Kartı elle savurmadan kararı doğrulamanın yolu.
         if CommandLine.arguments.contains("--flicktest") {
             let visible = NSRect(x: 0, y: 0, width: 1512, height: 900)
