@@ -138,9 +138,6 @@ final class DictationController {
         // Akışta çevrilmiş parçalar varsa kalan artık kısa olabilir; minimum
         // süre şartını uygulama.
         let wasStreaming = (state == .locked)
-        // VAD sıfırlanmadan OKU: son artık parçanın önündeki duraklama
-        // hâlâ ölçülüyor, `recorder.stop()` sonrası kaybolur.
-        let tailGap = recorder.currentGap
         stopStreaming()
 
         let samples: [Float]
@@ -174,7 +171,7 @@ final class DictationController {
         }
 
         state = .transcribing
-        enqueueDelivery(samples, silenceBefore: tailGap)
+        enqueueDelivery(samples)
         completeSession()
     }
 
@@ -201,7 +198,7 @@ final class DictationController {
     /// şey yazılması demekti; kullanıcı bunu "her sustuğumda kopyalıyor" diye
     /// bildirdi. Çeviri hâlâ parçalı — iş konuşma sürerken yapılıyor, sadece
     /// TESLİM sona alındı. Böylece bekleme uzamıyor ama yapıştırma bir kez oluyor.
-    private var pieces: [Stitcher.Piece] = []
+    private var pieces: [String] = []
 
     /// Şimdiye kadar çevrilen metin — bir SONRAKİ parçaya decoder bağlamı
     /// olarak veriliyor. Whisper'ın cümlenin ortasında olduğunu anlamasının
@@ -213,15 +210,15 @@ final class DictationController {
     /// isteyen tarafın parçaları burada yeniden birleştirmesi şart.
     private var sessionAudio: [Float] = []
 
-    private func enqueueDelivery(_ samples: [Float], silenceBefore: TimeInterval) {
+    private func enqueueDelivery(_ samples: [Float]) {
         let previous = deliveryChain
         deliveryChain = Task { [weak self] in
             await previous?.value
-            await self?.deliver(samples, silenceBefore: silenceBefore)
+            await self?.deliver(samples)
         }
     }
 
-    private func deliver(_ samples: [Float], silenceBefore: TimeInterval) async {
+    private func deliver(_ samples: [Float]) async {
         // Çeviriden ÖNCE: metin boş dönse de (sessizlik kapısı, halüsinasyon
         // filtresi) ses oturumun parçası. Yeniden çeviri o parçayı da görmeli.
         sessionAudio.append(contentsOf: samples)
@@ -234,7 +231,7 @@ final class DictationController {
             let text = try await transcriber.transcribe(samples, context: carry)
             Trace.log("çeviri \(String(format: "%.2f", Date().timeIntervalSince(started))) sn → \"\(text)\"")
             guard !text.isEmpty else { return }
-            pieces.append(Stitcher.Piece(text: text, silenceBefore: silenceBefore))
+            pieces.append(text)
             context = String((context + " " + text).suffix(200))
             spokenSeconds += Double(samples.count) / AudioRecorder.sampleRate
         } catch {
@@ -346,7 +343,7 @@ final class DictationController {
                 }
                 guard let segment = self.recorder.takeSegment() else { continue }
                 Trace.log("parça hazır — \(String(format: "%.1f", Double(segment.samples.count) / AudioRecorder.sampleRate)) sn, öncesinde \(String(format: "%.1f", segment.silenceBefore)) sn duraklama")
-                self.enqueueDelivery(segment.samples, silenceBefore: segment.silenceBefore)
+                self.enqueueDelivery(segment.samples)
             }
         }
     }

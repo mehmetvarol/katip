@@ -8,31 +8,32 @@ import Foundation
 ///
 ///   1. Uydurma cümle sonu — nefes almak için durduğunda parçayı noktalayıp
 ///      sonrakini büyük harfle başlatıyor:
-///      "…yanlış anlaşılma var." + "Ben canlı görsel istemiyorum."
+///      "…dosyaya çıkart." + "Ve persist middleware'ini de ekle."
 ///   2. Kayıp noktalama — gerçek cümle sonunda hiç nokta koymuyor:
 ///      "…o kadar değişiklik yaptık" + "hiç komik görünmüyor"
 ///
-/// Ayrımı yapabilecek tek bilgi Whisper'da değil bizde: **kesime sebep olan
-/// sessizliğin uzunluğu**. Kısa duraklama = cümle sürüyor, uzun duraklama =
-/// cümle bitti. `SpeechSegmenter.Cut.silence` bunu taşıyor.
+/// ## Süre eşiği denendi ve çürütüldü
+///
+/// İlk sürüm ayrımı **duraklama süresine** bakarak yapıyordu: kısa boşluk
+/// nefes, uzun boşluk cümle sonu. Fikir makuldü, ölçüm çürüttü.
+///
+/// Gerçek dikte kayıtlarından 7 dikiş etiketlenip ölçüldü (2026-08-21;
+/// ayrıntı vault'ta `2026-08-21-katip-duraklama-esigi-olcumu`):
+///
+///     cümle SÜRÜYOR : 0.8  0.9  1.7  2.1 sn
+///     cümle SONU    : 1.2  1.4       2.8 sn
+///
+/// İki sınıf tamamen iç içe — üstelik en KISA boşluk (0.8 sn) cümle ortası,
+/// en UZUNU (2.8 sn) cümle sonu. Ayıran hiçbir eşik yok ve daha büyük bir
+/// örneklem de yaratamaz, çünkü konuşmada duraklama uzunluğu sözdizimini
+/// değil BİLİŞSEL YÜKÜ ölçüyor: 2.1 saniyelik boşlukta kullanıcı "…dosyaya
+/// çıkart" deyip durmuş, İngilizce terimi hatırlayıp "ve persist
+/// middleware'ini de ekle" diye DEVAM etmişti.
+///
+/// Karar bu yüzden artık yalnızca KELİMEYE bakıyor. Süre ölçümü
+/// `SpeechSegmenter`'da duruyor — log ve `--vadtest` için değerli, ama
+/// hiçbir kararı beslemiyor.
 enum Stitcher {
-    struct Piece {
-        var text: String
-        /// Bu parçadan ÖNCEKİ duraklamanın uzunluğu. İlk parçada anlamsız.
-        ///
-        /// "Sonraki" değil "önceki" olması teknik bir zorunluluk: kesim
-        /// eşiğe değer değmez atılıyor, duraklamanın gerçek uzunluğu ancak
-        /// konuşma geri döndüğünde biliniyor (bkz. `SpeechSegmenter.Cut`).
-        var silenceBefore: TimeInterval
-    }
-
-    /// Bu eşiğin ALTI nefes/düşünme, ÜSTÜ cümle sonu sayılır.
-    ///
-    /// VAD zaten ≥0.7 sn sessizlikte kesiyor, yani buradaki bütün duraklamalar
-    /// 0.7 sn'den uzun. 1.1 sn "durup düşündüm" ile "cümleyi bitirdim" arasında
-    /// makul bir sınır; yanlış tarafa düşmenin bedeli tek bir noktalama işareti.
-    static let sentenceGap: TimeInterval = 1.1
-
     private static let turkish = Locale(identifier: "tr_TR")
     private static let terminators: Set<Character> = [".", "!", "?", "…", ":", ";", ","]
 
@@ -43,33 +44,33 @@ enum Stitcher {
     /// almıyoruz ve asimetriyi gözetiyoruz — cümle ortasında fazladan bir
     /// nokta okumayı zorlaştırır ama anlamı korur, meşru bir noktayı silmek
     /// ise iki cümleyi birbirine yapıştırır. İlk denemede "ben", "bu", "şimdi"
-    /// gibi kelimeler de listedeydi ve gerçek log'daki "…yanlış anlaşılma var."
-    /// + "Ben canlı görsel istemiyorum." çiftini yapıştırdı; hepsi çıkarıldı.
+    /// gibi kelimeler de listedeydi ve gerçek log'daki "…yanlış anlaşılma
+    /// var." + "Ben canlı görsel istemiyorum." çiftini yapıştırdı; hepsi
+    /// çıkarıldı.
+    ///
+    /// Türkçe yazıda "Ama"/"Çünkü" ile cümleye başlamak mümkün — yani bu
+    /// kural bazen meşru bir bölmeyi birleştirecek. Kabul edilen takas: dikte
+    /// edilen metinde bağlaçla başlayan bir parça, cümlenin devamı olma
+    /// ihtimali çok daha yüksek.
     private static let continuations: Set<String> = [
         "ve", "veya", "ya", "ki", "de", "da", "yani", "çünkü", "zira",
         "ama", "fakat", "ancak", "hem",
         "için", "gibi", "ile", "kadar", "diye", "göre", "rağmen",
     ]
 
-    static func join(_ pieces: [Piece]) -> String {
+    static func join(_ pieces: [String]) -> String {
         var out = ""
-        for (index, piece) in pieces.enumerated() {
-            let text = piece.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        for piece in pieces {
+            let text = piece.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }
             guard !out.isEmpty else { out = text; continue }
 
-            // Dikişin türünü ÖNCEKİ parçanın sessizliği belirler.
-            let gap = piece.silenceBefore
-            if gap < sentenceGap, startsWithContinuation(text) {
-                // Kısa duraklama VE bağlaçla devam → cümle sürüyor.
+            if startsWithContinuation(text) {
                 out = dropSentenceEnd(out)
                 out += " " + lowercasedFirst(text)
-            } else if gap >= sentenceGap {
+            } else {
                 out = ensureSentenceEnd(out)
                 out += " " + capitalizedFirst(text)
-            } else {
-                // Kararsız dikiş: modelin yazdığına DOKUNMA.
-                out += " " + text
             }
         }
         return out
@@ -80,7 +81,7 @@ enum Stitcher {
     /// "?" ve "!" DOKUNULMAZ: onları model rastgele koymuyor, gerçekten soru
     /// veya ünlem tonu duyduğunda koyuyor. "…" da bilinçli bir işaret.
     private static func dropSentenceEnd(_ text: String) -> String {
-        guard text.hasSuffix(".") , !text.hasSuffix("..") else { return text }
+        guard text.hasSuffix("."), !text.hasSuffix("..") else { return text }
         return String(text.dropLast())
     }
 

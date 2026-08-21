@@ -467,10 +467,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         print("\n\(segments.count) parça:")
         for (number, span) in segments.enumerated() {
-            let seam = number == 0 ? "ilk parça"
-                : (span.2 < Stitcher.sentenceGap ? "cümle SÜRÜYOR" : "cümle SONU")
-            print(String(format: "  %2d) %5.1f–%5.1f sn  (%.1f sn)  öncesinde %.1f sn duraklama → %@",
-                         number + 1, span.0, span.1, span.1 - span.0, span.2, seam))
+            // Süre artık dikiş kararını VERMİYOR (ölçüldü, ayıramıyor —
+            // bkz. Stitcher). Yine de yazdırıyoruz: VAD'in nerede kestiğini
+            // ve duraklama dağılımını görmenin tek yolu bu.
+            print(String(format: "  %2d) %5.1f–%5.1f sn  (%.1f sn)  öncesinde %.1f sn duraklama",
+                         number + 1, span.0, span.1, span.1 - span.0, span.2))
         }
         let leftover = Double(buffer.count) / rate
         print(String(format: "  artık: %.1f sn", leftover))
