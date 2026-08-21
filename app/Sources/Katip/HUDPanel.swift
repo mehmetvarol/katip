@@ -492,12 +492,15 @@ private final class CardView: NSView {
     // MARK: Ölçüler
 
     static func size(for mode: HUDPanel.Mode) -> NSSize {
+        // Kapalı biçim SABİT — kullanıcının referans aldığı görünüm o.
+        // Diğerleri ~%20 küçültüldü ve iç boşlukları kısıldı: kart masaüstünde
+        // duran bir çubuk, açıldığında pencere gibi büyümemeli.
         switch mode {
         case .collapsed: NSSize(width: 58, height: 18)
-        case .expanded:  NSSize(width: 136, height: 74)
-        case .listening: NSSize(width: 140, height: 32)
-        case .notice(let text): NSSize(width: min(320, max(150, textWidth(text, 11) + 76)), height: 30)
-        case .result:    NSSize(width: 280, height: 140)
+        case .expanded:  NSSize(width: 108, height: 58)
+        case .listening: NSSize(width: 112, height: 26)
+        case .notice(let text): NSSize(width: min(280, max(132, textWidth(text, 10) + 62)), height: 26)
+        case .result:    NSSize(width: 224, height: 116)
         }
     }
 
@@ -613,15 +616,30 @@ private final class CardView: NSView {
             // Ataklı zarf: sese HIZLI yüksel, yavaş in. Simetrik yumuşatma
             // konuşmanın vuruşunu ezip animasyonu cansız gösteriyordu.
             // Zaman sabitleri saniye: yükselişte 20 ms, inişte 110 ms.
-            let raw = min(1, CGFloat(inputLevel) * 7)
+            let raw = min(1, CGFloat(inputLevel) * Self.levelGain)
             let tau: CGFloat = raw > energy ? 0.020 : 0.110
             energy += (raw - energy) * (1 - exp(-dt / tau))
             phase += Self.waveSpeed * dt
+
+            // Dinamik aralığı GENİŞLET. Eskiden kazanç 0.143'te doyduğu için
+            // her hece tavandaydı ve sessizlik bile belirgin dalga üretiyordu —
+            // yani aralık yoktu, animasyon "hep aynı" görünüyordu. İki adım:
+            //
+            //   kapı: gürültü tabanını dibe indirir → sessizlik DÜMDÜZ
+            //   eğri: kapının üstünde kalan bandı yayar → kısık konuşma da görünür
+            //
+            // Eğri üssü 1'in ALTINDA. Önce 1.3 denendi ("düşükleri bastır"
+            // mantığıyla) ve render'da görüldü ki gerçek kısık konuşma (tepe
+            // 0.10) dümdüz çıkıyor — kapı sessizliği zaten hallediyor, üstüne
+            // 1'den büyük üs koymak konuşmanın alt yarısını da eziyordu.
+            let gated = max(0, (energy - Self.noiseFloor) / (1 - Self.noiseFloor))
+            let punch = pow(gated, 0.7)
+
             shape { index, x in
                 // Ortada yüksek, uçlarda sönen siluet × soldan sağa akan dalga.
-                let envelope = 0.30 + 0.70 * sin(.pi * x)
-                let travel = 0.55 + 0.45 * sin(self.phase - CGFloat(index) * 0.55)
-                return max(0.05, self.energy * envelope * travel)
+                let envelope = 0.22 + 0.78 * sin(.pi * x)
+                let travel = 0.35 + 0.65 * sin(self.phase - CGFloat(index) * 0.55)
+                return max(0.04, punch * envelope * travel)
             }
 
         case .transcribing:
@@ -649,6 +667,23 @@ private final class CardView: NSView {
     }
 
     /// Dalganın akış hızı, radyan/saniye. Eski 30 Hz × 0.34 rad/kare ile aynı.
+    /// Ham tepe seviyeyi 0-1'e taşıyan kazanç.
+    ///
+    /// Eskiden 7'ydi ve **0.143'te doyuyordu** — gerçek log'a göre sıradan
+    /// konuşma 0.2-0.4 arasında, yani her hece tavana yapışıyordu ve dalga
+    /// "hep aynı" görünüyordu. Kazanç gerçek aralığa göre seçildi:
+    ///
+    ///     gerçek ölçüm (katip.log)   sessizlik 0.035 · konuşma 0.216 · yüksek 0.562
+    ///     kazanç 2.5 ile             0.09           · 0.54          · 1.00
+    ///
+    /// Artık konuşmanın vuruşu aralığın ORTASINA düşüyor, tavanına değil.
+    private static let levelGain: CGFloat = 2.5
+
+    /// Bunun altındaki enerji ses değil, mikrofon gürültü tabanı sayılır.
+    /// VAD'in konuşma eşiği 0.03 tepe → kazançla 0.075; kapıyı onun hemen
+    /// altına koyuyoruz ki ortam gürültüsü dümdüz kalsın.
+    private static let noiseFloor: CGFloat = 0.06
+
     private static let waveSpeed: CGFloat = 0.34 * 30
     private static let pulseSpeed: CGFloat = 0.22 * 30
 
@@ -691,39 +726,41 @@ private final class CardView: NSView {
         case .expanded:
             // Düğme sırası ALTTA, etiket ÜSTTE — fare çubuğun olduğu yerde kalsın
             // diye kart yukarı doğru açılıyor.
-            let cy: CGFloat = 20
+            let cy: CGFloat = 17
             l.buttons = [
-                (.language, circle(x: bounds.midX - 39, y: cy, d: 29)),
-                (.dictate,  circle(x: bounds.midX,      y: cy, d: 36)),
-                (.lock,     circle(x: bounds.midX + 39, y: cy, d: 29)),
+                (.language, circle(x: bounds.midX - 32, y: cy, d: 24)),
+                (.dictate,  circle(x: bounds.midX,      y: cy, d: 30)),
+                (.lock,     circle(x: bounds.midX + 32, y: cy, d: 24)),
             ]
-            let width = min(bounds.width - 6, Self.textWidth(hintTitle, 11) + 24)
-            l.label = NSRect(x: bounds.midX - width / 2, y: 47, width: width, height: 25)
+            let width = min(bounds.width - 6, Self.textWidth(hintTitle, 10) + 18)
+            l.label = NSRect(x: bounds.midX - width / 2, y: 37, width: width, height: 20)
 
         case .listening:
-            let d: CGFloat = 22
-            let inset: CGFloat = 5
+            let d: CGFloat = 18
+            let inset: CGFloat = 4
             l.buttons = [
                 (.cancel,  circle(x: inset + d / 2, y: bounds.midY, d: d)),
                 (.finish,  circle(x: bounds.maxX - inset - d / 2, y: bounds.midY, d: d)),
             ]
-            let gap = inset + d + 7
-            l.wave = NSRect(x: gap, y: bounds.minY + 7,
-                            width: bounds.width - 2 * gap, height: bounds.height - 14)
+            // Düğme ile dalga arası 5 pt: daha fazlası kartı boş gösteriyor,
+            // daha azı dalgayı düğmeye yapıştırıyor.
+            let gap = inset + d + 5
+            l.wave = NSRect(x: gap, y: bounds.minY + 4,
+                            width: bounds.width - 2 * gap, height: bounds.height - 8)
 
         case .notice:
-            l.mark = NSRect(x: 11, y: bounds.midY - 6, width: 13, height: 13)
-            l.body = NSRect(x: 30, y: bounds.midY - 7, width: bounds.width - 30 - 32, height: 15)
-            l.buttons = [(.dismiss, circle(x: bounds.maxX - 17, y: bounds.midY, d: 19))]
+            l.mark = NSRect(x: 9, y: bounds.midY - 5, width: 11, height: 11)
+            l.body = NSRect(x: 25, y: bounds.midY - 7, width: bounds.width - 25 - 27, height: 15)
+            l.buttons = [(.dismiss, circle(x: bounds.maxX - 15, y: bounds.midY, d: 17))]
 
         case .result:
-            l.mark = NSRect(x: 18, y: bounds.maxY - 34, width: 14, height: 14)
-            l.hint = NSRect(x: 40, y: bounds.maxY - 35, width: bounds.width - 40 - 46, height: 15)
+            l.mark = NSRect(x: 14, y: bounds.maxY - 28, width: 12, height: 12)
+            l.hint = NSRect(x: 32, y: bounds.maxY - 29, width: bounds.width - 32 - 38, height: 14)
             l.buttons = [
-                (.dismiss,  circle(x: bounds.maxX - 26, y: bounds.maxY - 27, d: 22)),
-                (.copyText, NSRect(x: bounds.maxX - 18 - 66, y: 16, width: 66, height: 25)),
+                (.dismiss,  circle(x: bounds.maxX - 21, y: bounds.maxY - 22, d: 19)),
+                (.copyText, NSRect(x: bounds.maxX - 14 - 58, y: 13, width: 58, height: 22)),
             ]
-            l.body = NSRect(x: 18, y: 50, width: bounds.width - 36, height: bounds.height - 50 - 42)
+            l.body = NSRect(x: 14, y: 42, width: bounds.width - 28, height: bounds.height - 42 - 34)
         }
         return l
     }

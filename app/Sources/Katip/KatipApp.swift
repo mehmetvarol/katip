@@ -219,6 +219,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             HUDPanel.renderSample(mode: .listening, levels: wave,
                                   to: dir + "/card-listening.png", ticks: 16)
+            // Ses seviyesine tepki: sessizlik ile konuşma arasındaki fark
+            // gözle görülebilmeli, yoksa "canlı" iddiası ölçülemez.
+            // Seviyeler katip.log'daki GERÇEK ölçümlerden: sessiz kayıt 0.035,
+            // normal konuşma 0.216, yüksek 0.562.
+            for (name, level) in [("sessiz", Float(0.003)), ("ortam", 0.035),
+                                  ("kisik", 0.10), ("konusma", 0.216), ("yuksek", 0.562)] {
+                HUDPanel.renderSample(mode: .listening, levels: wave,
+                                      to: dir + "/card-seviye-\(name).png",
+                                      ticks: 40, level: level)
+            }
             HUDPanel.renderSample(mode: .notice("Mikrofon izni yok"), levels: flat,
                                   to: dir + "/card-notice.png")
             HUDPanel.renderSample(mode: .result("Şu component'i refactor edelim, state yönetimi Zustand'a geçsin."),
