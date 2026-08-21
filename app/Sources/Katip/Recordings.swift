@@ -19,8 +19,17 @@ enum Recordings {
 
     static let sampleRate = 16_000.0
 
+    /// Sondaların (`--recordingprobe`) yazacağı geçici klasör.
+    ///
+    /// Olmasının sebebi gerçek bir hata: sonda ilk sürümde doğrudan gerçek
+    /// klasöre yazıyordu, 20 çöp dosya bıraktı ve budama sınırı yüzünden
+    /// KULLANICININ GERÇEK KAYITLARINI tahliye edebilirdi. Bir test, test
+    /// ettiği veriyi yok edemez.
+    static var overrideDirectory: URL?
+
     static var directory: URL {
-        let dir = Support.directory.appendingPathComponent("recordings", isDirectory: true)
+        let dir = overrideDirectory
+            ?? Support.directory.appendingPathComponent("recordings", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

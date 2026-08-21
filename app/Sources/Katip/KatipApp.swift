@@ -458,7 +458,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let cut = segmenter.feed(peak: peak, frames: chunk.count,
                                         bufferedSamples: buffer.count) {
                 let length = Double(cut.index) / rate
-                segments.append((consumed, consumed + length, cut.silence))
+                segments.append((consumed, consumed + length, cut.silenceBefore))
                 consumed += length
                 buffer.removeFirst(cut.index)
             }
@@ -467,9 +467,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         print("\n\(segments.count) parça:")
         for (number, span) in segments.enumerated() {
-            print(String(format: "  %2d) %5.1f–%5.1f sn  (%.1f sn)  ardından %.1f sn sessizlik → %@",
-                         number + 1, span.0, span.1, span.1 - span.0, span.2,
-                         span.2 < Stitcher.sentenceGap ? "cümle SÜRÜYOR" : "cümle SONU"))
+            let seam = number == 0 ? "ilk parça"
+                : (span.2 < Stitcher.sentenceGap ? "cümle SÜRÜYOR" : "cümle SONU")
+            print(String(format: "  %2d) %5.1f–%5.1f sn  (%.1f sn)  öncesinde %.1f sn duraklama → %@",
+                         number + 1, span.0, span.1, span.1 - span.0, span.2, seam))
         }
         let leftover = Double(buffer.count) / rate
         print(String(format: "  artık: %.1f sn", leftover))
@@ -516,6 +517,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func runRecordingProbe() {
+        // Gerçek kayıt klasörüne DOKUNMA. Sonda budamayı da sınıyor; gerçek
+        // klasörde çalışsaydı kullanıcının kayıtlarını siler.
+        let sandbox = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("katip-recordingprobe-\(UUID().uuidString)")
+        Recordings.overrideDirectory = sandbox
+        print("sonda klasörü: \(sandbox.lastPathComponent)")
+
+        // `defer` İŞE YARAMAZ: exit() onu atlar. Çıkış tek kapıdan geçmeli.
+        func finish(_ code: Int32, _ message: String) -> Never {
+            print(message)
+            try? FileManager.default.removeItem(at: sandbox)
+            exit(code)
+        }
+
         // 3 sn, 440 Hz sinüs — deterministik, kulakla değil sayıyla doğrulanır.
         let count = 48_000
         var original = [Float](repeating: 0, count: count)
@@ -524,42 +539,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let id = UUID()
-        guard let name = Recordings.save(original, id: id) else {
-            print("✗ kayıt yazılamadı"); exit(1)
-        }
+        guard let name = Recordings.save(original, id: id) else { finish(1, "✗ kayıt yazılamadı") }
         let url = Recordings.directory.appendingPathComponent(name)
         let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         print("yazıldı: \(name) — \(bytes) bayt (\(String(format: "%.1f", Double(bytes) / Double(count))) bayt/örnek)")
 
-        guard let loaded = try? Recordings.load(name) else { print("✗ okunamadı"); exit(1) }
+        guard let loaded = try? Recordings.load(name) else { finish(1, "✗ okunamadı") }
         print("okundu : \(loaded.count) örnek (beklenen \(count))")
-        guard loaded.count == count else { print("✗ örnek sayısı tutmuyor"); exit(1) }
+        guard loaded.count == count else { finish(1, "✗ örnek sayısı tutmuyor") }
 
         // 16-bit'e yuvarlama kaybı var; sıfır değil, KÜÇÜK olmalı.
         var worst: Float = 0
         for index in 0..<count { worst = max(worst, abs(loaded[index] - original[index])) }
         let limit: Float = 1.0 / 32_767 * 2
         print("en büyük sapma: \(String(format: "%.6f", worst)) (sınır \(String(format: "%.6f", limit)))")
+        guard worst <= limit else { finish(1, "✗ sapma çok büyük") }
+        print("✔ kaydet/oku turu sağlam")
 
         try? FileManager.default.removeItem(at: url)
-        guard worst <= limit else { print("✗ sapma çok büyük"); exit(1) }
-        print("✔ kaydet/oku turu sağlam")
 
         // Budama: sınırın üstüne çık, sınırda kalması gerekiyor. Bu sessizce
         // bozulursa ses klasörü sınırsız büyür — disk ve gizlilik sorunu.
-        let existing = (try? FileManager.default.contentsOfDirectory(
-            at: Recordings.directory, includingPropertiesForKeys: nil))?
-            .filter { $0.pathExtension == "wav" }.count ?? 0
         let short = [Float](repeating: 0.1, count: 1600)   // 0,1 sn
-        let overflow = Recordings.limit + 5 - existing
-        guard overflow > 0 else { print("(klasörde zaten \(existing) kayıt var, budama sınanmadı)"); exit(0) }
-        for _ in 0..<overflow { _ = Recordings.save(short, id: UUID()) }
-
+        for _ in 0..<(Recordings.limit + 5) { _ = Recordings.save(short, id: UUID()) }
         let after = (try? FileManager.default.contentsOfDirectory(
             at: Recordings.directory, includingPropertiesForKeys: nil))?
             .filter { $0.pathExtension == "wav" }.count ?? 0
         print("budama: \(Recordings.limit + 5) kayda çıkıldı → \(after) kaldı (sınır \(Recordings.limit))")
-        exit(after <= Recordings.limit ? 0 : 1)
+        finish(after <= Recordings.limit ? 0 : 1,
+               after <= Recordings.limit ? "✔ budama sınırda tutuyor" : "✗ budama tutmadı")
     }
 
     // MARK: - Öz-test

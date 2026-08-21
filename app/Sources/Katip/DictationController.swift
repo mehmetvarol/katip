@@ -138,6 +138,9 @@ final class DictationController {
         // Akışta çevrilmiş parçalar varsa kalan artık kısa olabilir; minimum
         // süre şartını uygulama.
         let wasStreaming = (state == .locked)
+        // VAD sıfırlanmadan OKU: son artık parçanın önündeki duraklama
+        // hâlâ ölçülüyor, `recorder.stop()` sonrası kaybolur.
+        let tailGap = recorder.currentGap
         stopStreaming()
 
         let samples: [Float]
@@ -171,8 +174,7 @@ final class DictationController {
         }
 
         state = .transcribing
-        // Son artık; ardında dikilecek bir parça yok.
-        enqueueDelivery(samples, silenceAfter: 0)
+        enqueueDelivery(samples, silenceBefore: tailGap)
         completeSession()
     }
 
@@ -211,15 +213,15 @@ final class DictationController {
     /// isteyen tarafın parçaları burada yeniden birleştirmesi şart.
     private var sessionAudio: [Float] = []
 
-    private func enqueueDelivery(_ samples: [Float], silenceAfter: TimeInterval) {
+    private func enqueueDelivery(_ samples: [Float], silenceBefore: TimeInterval) {
         let previous = deliveryChain
         deliveryChain = Task { [weak self] in
             await previous?.value
-            await self?.deliver(samples, silenceAfter: silenceAfter)
+            await self?.deliver(samples, silenceBefore: silenceBefore)
         }
     }
 
-    private func deliver(_ samples: [Float], silenceAfter: TimeInterval) async {
+    private func deliver(_ samples: [Float], silenceBefore: TimeInterval) async {
         // Çeviriden ÖNCE: metin boş dönse de (sessizlik kapısı, halüsinasyon
         // filtresi) ses oturumun parçası. Yeniden çeviri o parçayı da görmeli.
         sessionAudio.append(contentsOf: samples)
@@ -232,7 +234,7 @@ final class DictationController {
             let text = try await transcriber.transcribe(samples, context: carry)
             Trace.log("çeviri \(String(format: "%.2f", Date().timeIntervalSince(started))) sn → \"\(text)\"")
             guard !text.isEmpty else { return }
-            pieces.append(Stitcher.Piece(text: text, silenceAfter: silenceAfter))
+            pieces.append(Stitcher.Piece(text: text, silenceBefore: silenceBefore))
             context = String((context + " " + text).suffix(200))
             spokenSeconds += Double(samples.count) / AudioRecorder.sampleRate
         } catch {
@@ -343,8 +345,8 @@ final class DictationController {
                 default: return                     // kayıt bitti, döngüyü kapat
                 }
                 guard let segment = self.recorder.takeSegment() else { continue }
-                Trace.log("parça hazır — \(String(format: "%.1f", Double(segment.samples.count) / AudioRecorder.sampleRate)) sn, ardından \(String(format: "%.1f", segment.silence)) sn sessizlik")
-                self.enqueueDelivery(segment.samples, silenceAfter: segment.silence)
+                Trace.log("parça hazır — \(String(format: "%.1f", Double(segment.samples.count) / AudioRecorder.sampleRate)) sn, öncesinde \(String(format: "%.1f", segment.silenceBefore)) sn duraklama")
+                self.enqueueDelivery(segment.samples, silenceBefore: segment.silenceBefore)
             }
         }
     }

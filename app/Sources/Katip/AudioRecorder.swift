@@ -194,13 +194,20 @@ final class AudioRecorder {
 
     /// Kilit modunda hazır bir cümle parçası varsa döner ve tampondan çıkarır.
     /// Yoksa `nil` — kayıt kesintisiz devam eder.
-    func takeSegment() -> (samples: [Float], silence: TimeInterval)? {
+    func takeSegment() -> (samples: [Float], silenceBefore: TimeInterval)? {
         lock.lock(); defer { lock.unlock() }
         guard let cut = pendingCut, cut.index > 0, cut.index <= samples.count else { return nil }
         let segment = Array(samples[0..<cut.index])
         samples.removeFirst(cut.index)
         pendingCut = nil
-        return (segment, cut.silence)
+        return (segment, cut.silenceBefore)
+    }
+
+    /// Son artık parçanın önündeki boşluk. `stop()` VAD'i sıfırlamadan
+    /// okunmalı — kullanıcı kaydı bitirdiğinde son duraklama hâlâ ölçülüyor.
+    var currentGap: TimeInterval {
+        lock.lock(); defer { lock.unlock() }
+        return segmenter.currentGap
     }
 
     private func resetVAD() {

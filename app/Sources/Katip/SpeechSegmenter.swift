@@ -17,7 +17,19 @@ struct SpeechSegmenter {
     /// (bkz. `DictationController.stitch`).
     struct Cut {
         var index: Int
-        var silence: TimeInterval
+        /// Bu parçanın konuşması BAŞLAMADAN önceki duraklamanın tam uzunluğu.
+        ///
+        /// Neden "önce" ve neden ayrı ölçülüyor: kesim, eşiğe (`minSilence`)
+        /// değer değmez atılıyor — gecikmeyi gizlemek için şart, çeviri
+        /// kullanıcı hâlâ konuşurken başlasın diye. Ama bu, kesim ANINDA
+        /// duraklamanın daha ne kadar süreceğini bilmediğimiz anlamına
+        /// geliyor. İlk sürüm bu yüzden BOZUKTU: her kesim eşiğin kendisini
+        /// (0.8 sn) raporluyordu, gerçek 3 saniyelik düşünme molalarını bile.
+        /// Gerçek kayıtta ölçüldü — dört kesimin dördü de 0.8 sn dedi.
+        ///
+        /// Doğrusu: kesimi yine erken at, ama sessizliği konuşma yeniden
+        /// başlayana kadar SAYMAYA DEVAM ET ve ölçümü bir SONRAKİ parçaya ilikle.
+        var silenceBefore: TimeInterval
     }
 
     var speechPeak: Float = 0.03
@@ -38,10 +50,25 @@ struct SpeechSegmenter {
     private var speechFrames = 0
     private var silenceFrames = 0
 
+    /// Kesimden sonra süren sessizliği ölçüyoruz (bkz. `Cut.silenceBefore`).
+    private var measuringGap = false
+    private var gapFrames = 0
+    /// Konuşma yeniden başlayınca dondurulan, bir sonraki kesimde raporlanacak boşluk.
+    private var nextGap: TimeInterval = 0
+
+    /// Şu an ölçülmekte olan boşluk. Kayıt kullanıcı tarafından bitirildiğinde
+    /// son artık parçanın önündeki boşluğu okumak için gerekiyor.
+    var currentGap: TimeInterval {
+        measuringGap ? Double(gapFrames) / sampleRate : nextGap
+    }
+
     mutating func reset() {
         isSpeaking = false
         speechFrames = 0
         silenceFrames = 0
+        measuringGap = false
+        gapFrames = 0
+        nextGap = 0
     }
 
     /// Yeni bir ses bloğu besle. Cümle bittiyse tampondaki kesim noktasını döner.
@@ -50,11 +77,21 @@ struct SpeechSegmenter {
     /// göndermek Whisper'ı Türkçe'de uydurma altyazı üretmeye itiyor.
     mutating func feed(peak: Float, frames: Int, bufferedSamples: Int) -> Cut? {
         if peak > speechPeak {
+            // Konuşma döndü → ölçtüğümüz boşluk tamamlandı, dondur.
+            if measuringGap {
+                nextGap = Double(gapFrames) / sampleRate
+                measuringGap = false
+                gapFrames = 0
+            }
             if !isSpeaking { isSpeaking = true; speechFrames = 0 }
             speechFrames += frames
             silenceFrames = 0
             return nil
         }
+
+        // Bu, `isSpeaking` kapısından ÖNCE olmalı: kesimden sonra `isSpeaking`
+        // false ve boşluk asıl o zaman uzuyor.
+        if measuringGap { gapFrames += frames }
 
         guard isSpeaking else { return nil }
         silenceFrames += frames
@@ -71,10 +108,18 @@ struct SpeechSegmenter {
         // sadece bu kesimden vazgeçiyoruz.)
         guard Double(cut) / sampleRate >= minSegment else { return nil }
 
-        let silence = Double(silenceFrames) / sampleRate
+        // Bu parçanın ÖNÜNDEKİ boşluk, bir önceki kesimden beri ölçülen.
+        let gapBefore = nextGap
+        nextGap = 0
+
+        // Şu anda tükettiğimiz sessizlik, bir SONRAKİ parçanın önündeki
+        // boşluğun başlangıcı — saymaya oradan devam ediyoruz.
+        measuringGap = true
+        gapFrames = silenceFrames
+
         isSpeaking = false
         speechFrames = 0
         silenceFrames = 0
-        return Cut(index: min(cut, bufferedSamples), silence: silence)
+        return Cut(index: min(cut, bufferedSamples), silenceBefore: gapBefore)
     }
 }

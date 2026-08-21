@@ -18,8 +18,12 @@ import Foundation
 enum Stitcher {
     struct Piece {
         var text: String
-        /// Bu parçayı bitiren sessizliğin uzunluğu. Son parçada anlamsız.
-        var silenceAfter: TimeInterval
+        /// Bu parçadan ÖNCEKİ duraklamanın uzunluğu. İlk parçada anlamsız.
+        ///
+        /// "Sonraki" değil "önceki" olması teknik bir zorunluluk: kesim
+        /// eşiğe değer değmez atılıyor, duraklamanın gerçek uzunluğu ancak
+        /// konuşma geri döndüğünde biliniyor (bkz. `SpeechSegmenter.Cut`).
+        var silenceBefore: TimeInterval
     }
 
     /// Bu eşiğin ALTI nefes/düşünme, ÜSTÜ cümle sonu sayılır.
@@ -55,7 +59,7 @@ enum Stitcher {
             guard !out.isEmpty else { out = text; continue }
 
             // Dikişin türünü ÖNCEKİ parçanın sessizliği belirler.
-            let gap = pieces[index - 1].silenceAfter
+            let gap = piece.silenceBefore
             if gap < sentenceGap, startsWithContinuation(text) {
                 // Kısa duraklama VE bağlaçla devam → cümle sürüyor.
                 out = dropSentenceEnd(out)
