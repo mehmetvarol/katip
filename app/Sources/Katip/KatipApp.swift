@@ -60,6 +60,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             exit(0)
         }
 
+        // Ses saklama turu: yaz → oku → karşılaştır. Yeniden çeviri buna
+        // dayanıyor; bozuk bir kaydet/oku sessizce kötü metin üretirdi.
+        if CommandLine.arguments.contains("--recordingprobe") {
+            runRecordingProbe()
+            return
+        }
+
         if let index = CommandLine.arguments.firstIndex(of: "--vadtest") {
             runVADTest(path: CommandLine.arguments.dropFirst(index + 1).first)
             return
@@ -128,6 +135,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkey.onPress = { [weak self] in self?.controller.hotkeyPressed() }
         hotkey.onRelease = { [weak self] in self?.controller.hotkeyReleased() }
         hotkey.start()
+
+        // Geçmiş penceresi modeli tanımıyor; yeniden çeviri bağlantısını
+        // burada kuruyoruz.
+        HistoryWindowController.shared.retranscribe = { [weak self] entry in
+            guard let self else { return .failure(DictationController.RetranscribeError.busy) }
+            return await self.controller.retranscribe(entry)
+        }
 
         controller.prepare()
     }
@@ -499,6 +513,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for (wrong, right) in proposals.prefix(15) { print("  \(wrong) = \(right)") }
         }
         exit(0)
+    }
+
+    private func runRecordingProbe() {
+        // 3 sn, 440 Hz sinüs — deterministik, kulakla değil sayıyla doğrulanır.
+        let count = 48_000
+        var original = [Float](repeating: 0, count: count)
+        for index in 0..<count {
+            original[index] = 0.5 * sinf(2 * .pi * 440 * Float(index) / 16_000)
+        }
+
+        let id = UUID()
+        guard let name = Recordings.save(original, id: id) else {
+            print("✗ kayıt yazılamadı"); exit(1)
+        }
+        let url = Recordings.directory.appendingPathComponent(name)
+        let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        print("yazıldı: \(name) — \(bytes) bayt (\(String(format: "%.1f", Double(bytes) / Double(count))) bayt/örnek)")
+
+        guard let loaded = try? Recordings.load(name) else { print("✗ okunamadı"); exit(1) }
+        print("okundu : \(loaded.count) örnek (beklenen \(count))")
+        guard loaded.count == count else { print("✗ örnek sayısı tutmuyor"); exit(1) }
+
+        // 16-bit'e yuvarlama kaybı var; sıfır değil, KÜÇÜK olmalı.
+        var worst: Float = 0
+        for index in 0..<count { worst = max(worst, abs(loaded[index] - original[index])) }
+        let limit: Float = 1.0 / 32_767 * 2
+        print("en büyük sapma: \(String(format: "%.6f", worst)) (sınır \(String(format: "%.6f", limit)))")
+
+        try? FileManager.default.removeItem(at: url)
+        guard worst <= limit else { print("✗ sapma çok büyük"); exit(1) }
+        print("✔ kaydet/oku turu sağlam")
+
+        // Budama: sınırın üstüne çık, sınırda kalması gerekiyor. Bu sessizce
+        // bozulursa ses klasörü sınırsız büyür — disk ve gizlilik sorunu.
+        let existing = (try? FileManager.default.contentsOfDirectory(
+            at: Recordings.directory, includingPropertiesForKeys: nil))?
+            .filter { $0.pathExtension == "wav" }.count ?? 0
+        let short = [Float](repeating: 0.1, count: 1600)   // 0,1 sn
+        let overflow = Recordings.limit + 5 - existing
+        guard overflow > 0 else { print("(klasörde zaten \(existing) kayıt var, budama sınanmadı)"); exit(0) }
+        for _ in 0..<overflow { _ = Recordings.save(short, id: UUID()) }
+
+        let after = (try? FileManager.default.contentsOfDirectory(
+            at: Recordings.directory, includingPropertiesForKeys: nil))?
+            .filter { $0.pathExtension == "wav" }.count ?? 0
+        print("budama: \(Recordings.limit + 5) kayda çıkıldı → \(after) kaldı (sınır \(Recordings.limit))")
+        exit(after <= Recordings.limit ? 0 : 1)
     }
 
     // MARK: - Öz-test

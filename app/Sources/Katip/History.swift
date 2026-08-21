@@ -10,9 +10,16 @@ import Foundation
 struct HistoryEntry: Codable, Identifiable {
     let id: UUID
     let date: Date
-    let text: String
+    var text: String
     let app: String?
     let seconds: Double?
+    /// Ham sesin dosya adı (`Recordings` klasöründe). Eski kayıtlarda YOK —
+    /// isteğe bağlı olması bilinçli, alan eklenmeden önce yazılmış
+    /// `history.jsonl` satırları böylece okunmaya devam ediyor.
+    var audio: String?
+    /// Bu metin sonradan yeniden çevrildiyse işaretli. Kullanıcı hangi
+    /// kaydın elle düzeltildiğini görebilmeli.
+    var retranscribed: Bool?
 
     init(text: String, app: String?, seconds: Double?) {
         self.id = UUID()
@@ -43,8 +50,11 @@ final class History {
 
     private init() { load() }
 
-    func add(text: String, app: String?, seconds: Double?) {
-        let entry = HistoryEntry(text: text, app: app, seconds: seconds)
+    /// - Parameter samples: diktenin ham sesi. Saklanınca kötü çıkan bir
+    ///   çeviri baştan konuşmadan yeniden denenebiliyor.
+    func add(text: String, app: String?, seconds: Double?, samples: [Float] = []) {
+        var entry = HistoryEntry(text: text, app: app, seconds: seconds)
+        entry.audio = Recordings.save(samples, id: entry.id)
         entries.insert(entry, at: 0)
         if entries.count > Self.limit { entries.removeLast(entries.count - Self.limit) }
 
@@ -67,9 +77,23 @@ final class History {
         }
     }
 
+    /// Yeniden çevrilen bir kaydın metnini değiştirir.
+    ///
+    /// Satır ekleme yerine dosyayı baştan yazıyoruz: JSON Lines'da bir satırı
+    /// yerinde güncellemenin ucuz bir yolu yok ve geçmiş birkaç yüz KB.
+    func update(id: UUID, text: String) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[index].text = text
+        entries[index].retranscribed = true
+        rewrite()
+        onChange?()
+    }
+
     func clear() {
         entries.removeAll()
         try? FileManager.default.removeItem(at: fileURL)
+        // Ses metinden daha hassas — geçmiş temizlenirken o da gitmeli.
+        Recordings.clear()
         onChange?()
         Trace.log("geçmiş temizlendi")
     }

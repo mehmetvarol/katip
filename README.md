@@ -90,6 +90,9 @@ ses dalgasıyla genişler. Kenara sürükleyip yapıştırabilirsin.
 - **Projelerinden terim öğrenme** — `package.json` bağımlılıklarını tarayıp
   telaffuz kurallarını önerir (`Katip --learn ~/Desktop`)
 - **Girişte başlat** (sağ tık → Girişte başlat)
+- **Yeniden çevir** — çeviri kötü çıktıysa geçmiş penceresinden aynı sesi
+  tekrar çevirtebilirsin. Canlı diktenin aksine ses parçalanmadan tek seferde
+  gidiyor, yani modele bütün bağlam birden veriliyor.
 
 Ayarlar düz metin dosyaları olarak `~/Library/Application Support/Katip/` altında:
 
@@ -98,7 +101,13 @@ Ayarlar düz metin dosyaları olarak `~/Library/Application Support/Katip/` alt�
 | `glossary.txt` | Whisper'a terim ipucu (bütçe 111 token, kritik terimleri sona yaz) |
 | `replacements.txt` | `yanlış = doğru` düzeltme kuralları |
 | `snippets.txt` | `tetikleyici = uzun metin` kısayolları |
+| `history.jsonl` | Dikte geçmişi (düz metin, 30 gün) |
+| `recordings/` | Son 20 diktenin **ham sesi** — "Yeniden çevir" bunu kullanıyor |
 | `katip.log` | Çalışma zamanı günlüğü |
+
+> Sesin `recordings/` altında duruyor. Son 20 kayıtla sınırlı ve geçmiş
+> penceresindeki **Sesleri sil** ile tamamen silinebilir. Hiçbir yere
+> gönderilmiyor — bu uygulamada ağ trafiği yok.
 
 ## Gereksinimler
 

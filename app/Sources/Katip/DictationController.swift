@@ -122,6 +122,7 @@ final class DictationController {
             Trace.log("kayıt başladı")
             pieces.removeAll()
             context = ""
+            sessionAudio = []
             spokenSeconds = 0
             state = .recording
             startStreaming()
@@ -205,6 +206,11 @@ final class DictationController {
     /// tek yolu bu; onsuz her parçayı büyük harfle başlatıp noktayla bitiriyor.
     private var context = ""
 
+    /// Oturumun TAMAMININ ham sesi. Akış parçaları tampondan çıkarıldığı için
+    /// kayıt bittiğinde geriye sadece son artık kalıyor — sesi saklamak
+    /// isteyen tarafın parçaları burada yeniden birleştirmesi şart.
+    private var sessionAudio: [Float] = []
+
     private func enqueueDelivery(_ samples: [Float], silenceAfter: TimeInterval) {
         let previous = deliveryChain
         deliveryChain = Task { [weak self] in
@@ -214,6 +220,9 @@ final class DictationController {
     }
 
     private func deliver(_ samples: [Float], silenceAfter: TimeInterval) async {
+        // Çeviriden ÖNCE: metin boş dönse de (sessizlik kapısı, halüsinasyon
+        // filtresi) ses oturumun parçası. Yeniden çeviri o parçayı da görmeli.
+        sessionAudio.append(contentsOf: samples)
         do {
             let started = Date()
             // Bağlam uzun duraklamadan sonra da veriliyor: kuyruk noktayla
@@ -239,8 +248,10 @@ final class DictationController {
     private func flush() async {
         let text = Stitcher.join(pieces)
         let seconds = spokenSeconds
+        let audio = sessionAudio
         pieces.removeAll()
         context = ""
+        sessionAudio = []
         spokenSeconds = 0
         guard !text.isEmpty else { return }
 
@@ -249,17 +260,61 @@ final class DictationController {
         do {
             try await TextInjector.inject(text)
             Trace.log("metin yazıldı ✔ (\(text.count) karakter, tek parça)")
-            History.shared.add(text: text, app: target, seconds: seconds)
+            History.shared.add(text: text, app: target, seconds: seconds, samples: audio)
             NotificationCenter.default.post(name: .katipHistoryChanged, object: nil)
         } catch {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
             Trace.log("HATA: \(error) — metin panoya bırakıldı")
-            History.shared.add(text: text, app: target, seconds: seconds)
+            History.shared.add(text: text, app: target, seconds: seconds, samples: audio)
             NotificationCenter.default.post(name: .katipHistoryChanged, object: nil)
             state = .error(error.localizedDescription)
             resetSoon()
             onUndelivered?(text)
+        }
+    }
+
+    // MARK: - Yeniden çeviri
+
+    /// Saklanmış bir kaydı yeniden çevirir.
+    ///
+    /// Canlı diktenin AKSİNE sesi parçalamıyor: tamamı tek çağrıda gidiyor.
+    /// Canlı yolda parçalama bir zorunluluk (metin akarak gelsin, sonda 13 sn
+    /// beklenmesin); burada öyle bir kısıt yok, dolayısıyla modele bütün bağlam
+    /// birden veriliyor ve dikiş hiç oluşmuyor. Bedeli süre: kayıt kadar uzun
+    /// bir bekleme.
+    ///
+    /// Metni imlece YAZMIYOR — kullanıcı bu sırada geçmiş penceresinde,
+    /// odak orada; yazmak metni yanlış yere düşürürdü.
+    func retranscribe(_ entry: HistoryEntry) async -> Result<String, Error> {
+        guard let name = entry.audio, Recordings.exists(name) else {
+            return .failure(RetranscribeError.audioMissing)
+        }
+        guard state == .idle || isError else {
+            return .failure(RetranscribeError.busy)
+        }
+        do {
+            let samples = try Recordings.load(name)
+            let started = Date()
+            let text = try await transcriber.transcribe(samples)
+            Trace.log("yeniden çeviri \(String(format: "%.2f", Date().timeIntervalSince(started))) sn → \"\(text)\"")
+            guard !text.isEmpty else { return .failure(RetranscribeError.empty) }
+            History.shared.update(id: entry.id, text: text)
+            return .success(text)
+        } catch {
+            Trace.log("yeniden çeviri HATASI: \(error)")
+            return .failure(error)
+        }
+    }
+
+    enum RetranscribeError: LocalizedError {
+        case audioMissing, busy, empty
+        var errorDescription: String? {
+            switch self {
+            case .audioMissing: "Bu kaydın sesi artık saklanmıyor."
+            case .busy: "Önce süren dikteyi bitir."
+            case .empty: "Ses yeniden çevrildi ama metin çıkmadı."
+            }
         }
     }
 
@@ -406,6 +461,7 @@ final class DictationController {
         recorder.cancel()
         pieces.removeAll()          // iptal: çevrilmiş parçalar da atılır
         context = ""
+        sessionAudio = []
         spokenSeconds = 0
         state = .idle
     }
