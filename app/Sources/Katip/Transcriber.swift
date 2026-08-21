@@ -97,7 +97,10 @@ actor Transcriber {
 
     func setLanguage(_ lang: String?) { languageOverride = lang }
 
-    func transcribe(_ samples: [Float]) async throws -> String {
+    /// - Parameter context: Aynı diktenin ÖNCEKİ parçasından çıkan metin.
+    ///   Whisper'ın `condition_on_previous_text`'i — decoder'a "bu cümle
+    ///   devam ediyor" bilgisini veren tek mekanizma.
+    func transcribe(_ samples: [Float], context: String? = nil) async throws -> String {
         guard let pipe else { throw TranscriberError.notLoaded }
         // Tokenizer yükleme anında hazır olmayabiliyor; ilk katipde tekrar dene.
         // Sessizce atlanırsa terminoloji yönlendirmesi hiç çalışmaz.
@@ -113,15 +116,52 @@ actor Transcriber {
             detectLanguage: false,
             skipSpecialTokens: true,
             withoutTimestamps: true,
-            promptTokens: promptTokens,
+            promptTokens: prompt(for: context),
             // Sessizlikte uydurma metin üretimine karşı (Türkçe'de "Altyazı M.K." tipi).
             noSpeechThreshold: 0.6
         )
 
         let results = try await pipe.transcribe(audioArray: samples, decodeOptions: options)
         let text = results.map(\.text).joined(separator: " ")
+
+        // Bağlam yönlendirmesinin bilinen arıza modu: decoder önceki metne
+        // kilitlenip tekrar döngüsüne giriyor. Ölçüldü (jfk.wav, kasten
+        // uyumsuz bağlam): "ne yapın ne yapın ne yapın…", 2.07 sn yerine
+        // 14.97 sn. WhisperKit'in kendi `compressionRatioThreshold` geri
+        // çekilmesi bu vakada YETMEDİ — beş sıcaklık denemesi de döngüye
+        // düştü. O yüzden bağlamı atıp bir kez daha deniyoruz; bedel sadece
+        // arıza anında ödeniyor.
+        if context != nil, Repetition.isRepetitive(text) {
+            Trace.log("bağlamlı çeviri tekrara düştü — bağlamsız yeniden deneniyor")
+            return try await transcribe(samples, context: nil)
+        }
         return Self.clean(text)
     }
+
+    // MARK: - Bağlam yönlendirme
+
+    /// Bir dikte parçası çevrilirken decoder'a verilecek ön-bağlam.
+    ///
+    /// İki kaynak birleşiyor: kullanıcı sözlüğü (statik terminoloji) ve önceki
+    /// parçanın metni (dinamik bağlam). Sıra ÖNEMLİ — WhisperKit bütçe aşımında
+    /// `promptTokens`'ı SONDAN tutuyor, yani en değerli olan sona konmalı.
+    /// Önceki metin sözlükten daha değerli: cümlenin ortasında olduğumuzu
+    /// yalnızca o söyleyebiliyor.
+    private func prompt(for context: String?) -> [Int]? {
+        guard let context, !context.isEmpty, let tokenizer = pipe?.tokenizer else {
+            return promptTokens
+        }
+        // Bağlamı kısa tut. Her prompt token'ı decoder prefill'ine ekleniyor ve
+        // ölçüldü ki 109 token ~2.3 sn'ye mal oluyor (bkz. `glossaryEnabled`).
+        // Cümlenin devam ettiğini anlatmak için son bir cümlelik kuyruk yeter.
+        let tail = String(context.suffix(Self.contextCharacterBudget))
+        let contextTokens = tokenizer.encode(text: " " + tail).suffix(Self.contextTokenBudget)
+        return (promptTokens ?? []) + Array(contextTokens)
+    }
+
+    /// Ölçümle seçildi, tahminle değil — bkz. `--selftest --context`.
+    private static let contextCharacterBudget = 120
+    private static let contextTokenBudget = 32
 
     // MARK: - Terminoloji yönlendirme
 

@@ -121,6 +121,7 @@ final class DictationController {
             try recorder.start()
             Trace.log("kayıt başladı")
             pieces.removeAll()
+            context = ""
             spokenSeconds = 0
             state = .recording
             startStreaming()
@@ -169,7 +170,8 @@ final class DictationController {
         }
 
         state = .transcribing
-        enqueueDelivery(samples)
+        // Son artık; ardında dikilecek bir parça yok.
+        enqueueDelivery(samples, silenceAfter: 0)
         completeSession()
     }
 
@@ -196,23 +198,33 @@ final class DictationController {
     /// şey yazılması demekti; kullanıcı bunu "her sustuğumda kopyalıyor" diye
     /// bildirdi. Çeviri hâlâ parçalı — iş konuşma sürerken yapılıyor, sadece
     /// TESLİM sona alındı. Böylece bekleme uzamıyor ama yapıştırma bir kez oluyor.
-    private var pieces: [String] = []
+    private var pieces: [Stitcher.Piece] = []
 
-    private func enqueueDelivery(_ samples: [Float]) {
+    /// Şimdiye kadar çevrilen metin — bir SONRAKİ parçaya decoder bağlamı
+    /// olarak veriliyor. Whisper'ın cümlenin ortasında olduğunu anlamasının
+    /// tek yolu bu; onsuz her parçayı büyük harfle başlatıp noktayla bitiriyor.
+    private var context = ""
+
+    private func enqueueDelivery(_ samples: [Float], silenceAfter: TimeInterval) {
         let previous = deliveryChain
         deliveryChain = Task { [weak self] in
             await previous?.value
-            await self?.deliver(samples)
+            await self?.deliver(samples, silenceAfter: silenceAfter)
         }
     }
 
-    private func deliver(_ samples: [Float]) async {
+    private func deliver(_ samples: [Float], silenceAfter: TimeInterval) async {
         do {
             let started = Date()
-            let text = try await transcriber.transcribe(samples)
+            // Bağlam uzun duraklamadan sonra da veriliyor: kuyruk noktayla
+            // bitiyorsa model zaten yeni cümleye büyük harfle başlıyor, ve
+            // terminoloji bağlamı iki cümle boyunca korunuyor.
+            let carry = context.isEmpty ? nil : context
+            let text = try await transcriber.transcribe(samples, context: carry)
             Trace.log("çeviri \(String(format: "%.2f", Date().timeIntervalSince(started))) sn → \"\(text)\"")
             guard !text.isEmpty else { return }
-            pieces.append(text)
+            pieces.append(Stitcher.Piece(text: text, silenceAfter: silenceAfter))
+            context = String((context + " " + text).suffix(200))
             spokenSeconds += Double(samples.count) / AudioRecorder.sampleRate
         } catch {
             Trace.log("çeviri HATASI: \(error)")
@@ -225,9 +237,10 @@ final class DictationController {
 
     /// Oturumun tamamını TEK seferde imlece yazar.
     private func flush() async {
-        let text = pieces.joined(separator: " ")
+        let text = Stitcher.join(pieces)
         let seconds = spokenSeconds
         pieces.removeAll()
+        context = ""
         spokenSeconds = 0
         guard !text.isEmpty else { return }
 
@@ -275,8 +288,8 @@ final class DictationController {
                 default: return                     // kayıt bitti, döngüyü kapat
                 }
                 guard let segment = self.recorder.takeSegment() else { continue }
-                Trace.log("parça hazır — \(String(format: "%.1f", Double(segment.count) / AudioRecorder.sampleRate)) sn")
-                self.enqueueDelivery(segment)
+                Trace.log("parça hazır — \(String(format: "%.1f", Double(segment.samples.count) / AudioRecorder.sampleRate)) sn, ardından \(String(format: "%.1f", segment.silence)) sn sessizlik")
+                self.enqueueDelivery(segment.samples, silenceAfter: segment.silence)
             }
         }
     }
@@ -392,6 +405,7 @@ final class DictationController {
         stopStreaming()
         recorder.cancel()
         pieces.removeAll()          // iptal: çevrilmiş parçalar da atılır
+        context = ""
         spokenSeconds = 0
         state = .idle
     }

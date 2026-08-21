@@ -430,7 +430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         var segmenter = SpeechSegmenter()
         var buffer: [Float] = []
-        var segments: [(Double, Double)] = []
+        var segments: [(Double, Double, Double)] = []
         var consumed = 0.0
         let block = 4096
 
@@ -443,18 +443,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             if let cut = segmenter.feed(peak: peak, frames: chunk.count,
                                         bufferedSamples: buffer.count) {
-                let length = Double(cut) / rate
-                segments.append((consumed, consumed + length))
+                let length = Double(cut.index) / rate
+                segments.append((consumed, consumed + length, cut.silence))
                 consumed += length
-                buffer.removeFirst(cut)
+                buffer.removeFirst(cut.index)
             }
             index = end
         }
 
         print("\n\(segments.count) parça:")
         for (number, span) in segments.enumerated() {
-            print(String(format: "  %2d) %5.1f–%5.1f sn  (%.1f sn)",
-                         number + 1, span.0, span.1, span.1 - span.0))
+            print(String(format: "  %2d) %5.1f–%5.1f sn  (%.1f sn)  ardından %.1f sn sessizlik → %@",
+                         number + 1, span.0, span.1, span.1 - span.0, span.2,
+                         span.2 < Stitcher.sentenceGap ? "cümle SÜRÜYOR" : "cümle SONU"))
         }
         let leftover = Double(buffer.count) / rate
         print(String(format: "  artık: %.1f sn", leftover))
@@ -526,12 +527,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 print("  hazır (\(String(format: "%.1f", Date().timeIntervalSince(clock))) sn)")
 
+                // Bağlam yönlendirmesinin BEDELİNİ ölçmek için: her prompt
+                // token'ı decoder prefill'ine ekleniyor ve ücretsiz değil.
+                let context = args.firstIndex(of: "--context").flatMap { args.dropFirst($0 + 1).first }
+                if let context { print("• bağlam: \"\(context)\"") }
+
                 // Üç kez: ilk tur ısınmayı içerir, asıl önemli olan sürekli hâl.
                 let audioSeconds = Double(samples.count) / 16000
                 var text = ""
                 for run in 1...3 {
                     clock = Date()
-                    text = try await transcriber.transcribe(samples)
+                    text = try await transcriber.transcribe(samples, context: context)
                     let elapsed = Date().timeIntervalSince(clock)
                     print("  tur \(run): \(String(format: "%.2f", elapsed)) sn  (RTF \(String(format: "%.2f", elapsed / audioSeconds))x)")
                 }

@@ -38,7 +38,7 @@ final class AudioRecorder {
 
     /// VAD ayrı tipte: mikrofon olmadan test edilebilsin (bkz. SpeechSegmenter).
     private var segmenter = SpeechSegmenter()
-    private var cutIndex: Int?
+    private var pendingCut: SpeechSegmenter.Cut?
 
     func start() throws {
         lock.lock()
@@ -194,22 +194,22 @@ final class AudioRecorder {
 
     /// Kilit modunda hazır bir cümle parçası varsa döner ve tampondan çıkarır.
     /// Yoksa `nil` — kayıt kesintisiz devam eder.
-    func takeSegment() -> [Float]? {
+    func takeSegment() -> (samples: [Float], silence: TimeInterval)? {
         lock.lock(); defer { lock.unlock() }
-        guard let cut = cutIndex, cut > 0, cut <= samples.count else { return nil }
-        let segment = Array(samples[0..<cut])
-        samples.removeFirst(cut)
-        cutIndex = nil
-        return segment
+        guard let cut = pendingCut, cut.index > 0, cut.index <= samples.count else { return nil }
+        let segment = Array(samples[0..<cut.index])
+        samples.removeFirst(cut.index)
+        pendingCut = nil
+        return (segment, cut.silence)
     }
 
     private func resetVAD() {
         segmenter.reset()
-        cutIndex = nil
+        pendingCut = nil
     }
 
     private func updateVAD(peak: Float, frames: Int) {
-        guard cutIndex == nil else { return }   // bekleyen parça varken yeni kesme yok
-        cutIndex = segmenter.feed(peak: peak, frames: frames, bufferedSamples: samples.count)
+        guard pendingCut == nil else { return }  // bekleyen parça varken yeni kesme yok
+        pendingCut = segmenter.feed(peak: peak, frames: frames, bufferedSamples: samples.count)
     }
 }
