@@ -67,6 +67,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Fiske → iniş noktası. Kartı elle savurmadan kararı doğrulamanın yolu.
+        if CommandLine.arguments.contains("--flicktest") {
+            let visible = NSRect(x: 0, y: 0, width: 1512, height: 900)
+            let card = NSRect(x: 700, y: 400, width: 140, height: 32)
+            print("ekran \(Int(visible.width))×\(Int(visible.height)), kart ortada (700, 400)")
+            print("yapışma mesafesi \(Int(HUDPanel.snapDistance)) px, kenar boşluğu \(Int(HUDPanel.snapMargin)) px\n")
+            let cases: [(String, NSPoint)] = [
+                ("dur (hız yok)",            NSPoint(x: 0, y: 0)),
+                ("hafif itiş sağa",          NSPoint(x: 150, y: 0)),
+                ("fiske sağa",               NSPoint(x: 1200, y: 0)),
+                ("sert fiske sağa",          NSPoint(x: 3000, y: 0)),
+                ("fiske sola",               NSPoint(x: -1200, y: 0)),
+                ("fiske aşağı",              NSPoint(x: 0, y: -1200)),
+                ("çapraz fiske sağ-yukarı",  NSPoint(x: 900, y: 900)),
+            ]
+            for (label, v) in cases {
+                let landing = HUDPanel.landingOrigin(frame: card, visible: visible, velocity: v)
+                let px = card.minX + Momentum.projection(of: v.x)
+                let py = card.minY + Momentum.projection(of: v.y)
+                let snapped = abs(landing.x - px) > 1 || abs(landing.y - py) > 1
+                print(String(format: "  %-24@ kestirim (%6.0f,%6.0f) → iniş (%6.0f,%6.0f)  %@",
+                             label as NSString, px, py, landing.x, landing.y,
+                             snapped ? "KENARA YAPIŞTI" : "serbest"))
+            }
+            exit(0)
+        }
+
         if let index = CommandLine.arguments.firstIndex(of: "--vadtest") {
             runVADTest(path: CommandLine.arguments.dropFirst(index + 1).first)
             return

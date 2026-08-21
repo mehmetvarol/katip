@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 /// Masaüstünde yüzen gösterge — tek bir "ada" gibi davranır: duruma göre şekil
 /// değiştirir, yer değiştirmez.
@@ -32,8 +33,8 @@ final class HUDPanel: NSPanel {
     }
 
     /// Kenara yapışma: bu mesafeye kadar yaklaşınca yapışır.
-    private static let snapDistance: CGFloat = 140
-    private static let snapMargin: CGFloat = 14
+    static let snapDistance: CGFloat = 140
+    static let snapMargin: CGFloat = 14
 
     var onAction: ((Action) -> Void)?
 
@@ -143,9 +144,18 @@ final class HUDPanel: NSPanel {
 
     func setDragging(_ on: Bool) {
         dragging = on
-        if !on {
+        if on {
+            // Hareket hâlindeki kart yakalandı: yayı ANINDA bırak. Kullanıcıyla
+            // yarışan bir animasyon, akıcılığı bozan tek şeydir.
+            stopAnimating()
+            dragSamples.removeAll()
+            startTicking()          // sürüklerken hız örneklemek için
+        } else {
+            let velocity = releaseVelocity()
+            dragSamples.removeAll()
             hovering = pointerInside
             applyHover()
+            snapToNearestEdge(velocity: velocity)
         }
     }
 
@@ -169,44 +179,164 @@ final class HUDPanel: NSPanel {
             origin.x = min(max(origin.x, visible.minX + 4), visible.maxX - size.width - 4)
             origin.y = min(max(origin.y, visible.minY + 4), visible.maxY - size.height - 4)
         }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            animator().setFrame(NSRect(origin: origin, size: size), display: true)
-        } completionHandler: { [weak self] in
-            self?.invalidateShadow()
+        // Biçim değişimi çekmece hissi: hafif aşma, çünkü kart bir yerden
+        // "açılıyor". Hız devri yok — bunu bir jest başlatmadı.
+        animate(to: NSRect(origin: origin, size: size), damping: 0.8, response: 0.3)
+    }
+
+    // MARK: - Yay motoru
+
+    /// Kartın çerçevesini süren dört bağımsız yay.
+    ///
+    /// Dört ayrı yay, tek bir 2B yay değil: X ve Y farklı hızlarda hareket
+    /// ettiğinde tek yay ikisini birbirine kilitleyip yolu büker. Genişlik ve
+    /// yükseklik de aynı sebeple ayrı — kart hem taşınırken hem biçim
+    /// değiştirirken ikisi çakışabiliyor.
+    private var springs: (x: Spring, y: Spring, w: Spring, h: Spring)?
+    private var displayLink: CADisplayLink?
+    private var lastTick: CFTimeInterval = 0
+
+    /// Sürükleme hızını ölçmek için son konumlar. Pencereyi AppKit taşıyor
+    /// (`isMovableByWindowBackground`), yani hareket geri çağrısı yok —
+    /// çerçeveyi kare kare örneklemekten başka yol yok.
+    private var dragSamples: [(point: NSPoint, time: CFTimeInterval)] = []
+
+    /// Sistemde hareket azaltma açıksa yay yok: kart hedefe doğrudan gider.
+    /// Azaltılmış hareket "geri bildirim yok" demek değil — kart yine yeni
+    /// yerinde beliriyor, sadece yolculuk kaldırılıyor.
+    private var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    private func animate(to target: NSRect, damping: CGFloat, response: TimeInterval,
+                         velocity: NSPoint = .zero) {
+        guard !reduceMotion else {
+            setFrame(target, display: true)
+            invalidateShadow()
+            savePosition()
+            return
         }
+        // Yay her zaman EKRANDAKİ değerden başlar, hedef değerden değil.
+        // Hedeften başlatmak, kesintiye uğrayan bir animasyonda görünür bir
+        // sıçrama demek.
+        let now = frame
+        springs = (
+            Spring(damping: damping, response: response,
+                   value: now.minX, target: target.minX, velocity: velocity.x),
+            Spring(damping: damping, response: response,
+                   value: now.minY, target: target.minY, velocity: velocity.y),
+            Spring(damping: damping, response: response,
+                   value: now.width, target: target.width),
+            Spring(damping: damping, response: response,
+                   value: now.height, target: target.height))
+        startTicking()
+    }
+
+    private func stopAnimating() { springs = nil }
+
+    private func startTicking() {
+        if displayLink == nil {
+            let link = card.displayLink(target: self, selector: #selector(tick))
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+        lastTick = CACurrentMediaTime()
+        displayLink?.isPaused = false
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        let now = CACurrentMediaTime()
+        let dt = now - lastTick
+        lastTick = now
+
+        // Sürüklerken pencere AppKit'in: YAZMA, sadece hızı örnekle.
+        if dragging {
+            dragSamples.append((frame.origin, now))
+            if dragSamples.count > 8 { dragSamples.removeFirst() }
+            return
+        }
+
+        guard var s = springs else {
+            link.isPaused = true          // iş yokken 120 Hz'de dönmenin anlamı yok
+            return
+        }
+        s.x.step(dt); s.y.step(dt); s.w.step(dt); s.h.step(dt)
+        springs = s
+
+        setFrame(NSRect(x: s.x.value, y: s.y.value, width: s.w.value, height: s.h.value),
+                 display: true)
+
+        if s.x.isSettled && s.y.isSettled && s.w.isSettled && s.h.isSettled {
+            springs = nil
+            link.isPaused = true
+            invalidateShadow()
+            savePosition()
+        }
+    }
+
+    /// Son örneklerden bırakma hızı (piksel/saniye).
+    ///
+    /// Tek bir kareye bakmak gürültülü — parmak/fare titremesi hızı savuruyor.
+    /// En az 30 ms'lik bir pencereye yayılan örnekleri kullanıyoruz; o kadar
+    /// veri yoksa hız yok sayılıyor (yavaş bırakma zaten momentum taşımaz).
+    private func releaseVelocity() -> NSPoint {
+        guard let last = dragSamples.last else { return .zero }
+        guard let first = dragSamples.first(where: { last.time - $0.time <= 0.12 }),
+              last.time - first.time >= 0.03 else { return .zero }
+
+        let dt = CGFloat(last.time - first.time)
+        return NSPoint(x: (last.point.x - first.point.x) / dt,
+                       y: (last.point.y - first.point.y) / dt)
     }
 
     // MARK: - Kenara yapışma
 
-    private func snapToNearestEdge() {
+    /// Bırakma anındaki hızla kartı FIRLATIR.
+    ///
+    /// Eskiden en yakın kenar BIRAKMA noktasından seçiliyordu, yani fiske ile
+    /// yavaşça bırakma arasında hiçbir fark yoktu — hız bilgisi çöpe gidiyordu.
+    /// Artık önce hızın kartı nereye götüreceği kestiriliyor (kaydırma
+    /// yavaşlamasının aynısı), kenar ORADAN seçiliyor ve yay bırakma hızıyla
+    /// başlatılıyor. Böylece sürükleme ile animasyon arasında dikiş kalmıyor.
+    private func snapToNearestEdge(velocity: NSPoint) {
         guard let visible = NSScreen.main?.visibleFrame else { return }
+        let origin = Self.landingOrigin(frame: frame, visible: visible, velocity: velocity)
 
-        let toLeft = frame.minX - visible.minX
-        let toRight = visible.maxX - frame.maxX
-        let toBottom = frame.minY - visible.minY
-        let toTop = visible.maxY - frame.maxY
+        // Fiske varsa hafif aşma (fiziksel his), yavaş bırakmada yok — hareketi
+        // başlatan jest momentum taşımıyorsa zıplamak yapay duruyor.
+        let flicked = hypot(velocity.x, velocity.y) > Self.flickVelocity
+        animate(to: NSRect(origin: origin, size: frame.size),
+                damping: flicked ? 0.8 : 1.0, response: 0.4, velocity: velocity)
+    }
 
-        var origin = frame.origin
+    static let flickVelocity: CGFloat = 200
+
+    /// Kartın nereye ineceği. Saf fonksiyon — ekransız test edilebilsin diye
+    /// ayrı (`Katip --flicktest`), `SpeechSegmenter`/`Stitcher` ile aynı gerekçe.
+    static func landingOrigin(frame: NSRect, visible: NSRect, velocity: NSPoint) -> NSPoint {
+        let projected = NSPoint(x: frame.minX + Momentum.projection(of: velocity.x),
+                                y: frame.minY + Momentum.projection(of: velocity.y))
+        let projectedRect = NSRect(origin: projected, size: frame.size)
+
+        let toLeft = projectedRect.minX - visible.minX
+        let toRight = visible.maxX - projectedRect.maxX
+        let toBottom = projectedRect.minY - visible.minY
+        let toTop = visible.maxY - projectedRect.maxY
+
+        var origin = projected
         let nearest = min(toLeft, toRight, toBottom, toTop)
-        guard nearest < Self.snapDistance else { return }
-
-        switch nearest {
-        case toLeft:   origin.x = visible.minX + Self.snapMargin
-        case toRight:  origin.x = visible.maxX - frame.width - Self.snapMargin
-        case toBottom: origin.y = visible.minY + Self.snapMargin
-        default:       origin.y = visible.maxY - frame.height - Self.snapMargin
+        if nearest < snapDistance {
+            switch nearest {
+            case toLeft:   origin.x = visible.minX + snapMargin
+            case toRight:  origin.x = visible.maxX - frame.width - snapMargin
+            case toBottom: origin.y = visible.minY + snapMargin
+            default:       origin.y = visible.maxY - frame.height - snapMargin
+            }
         }
 
         origin.x = min(max(origin.x, visible.minX + 4), visible.maxX - frame.width - 4)
         origin.y = min(max(origin.y, visible.minY + 4), visible.maxY - frame.height - 4)
-
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            animator().setFrameOrigin(origin)
-        }
+        return origin
     }
 
     // MARK: - Konum hatırlama (alt-orta — boyut değiştiği için)
@@ -230,11 +360,9 @@ final class HUDPanel: NSPanel {
         }
     }
 
-    override func mouseUp(with event: NSEvent) {
-        super.mouseUp(with: event)
-        snapToNearestEdge()
-        savePosition()
-    }
+    // NOT: yapışma burada DEĞİL, `setDragging(false)` içinde. Sıra önemli —
+    // CardView bırakışta önce setDragging(false), sonra super.mouseUp çağırıyor;
+    // hız örnekleri o ilk çağrıda hâlâ taze.
 
     /// Kart kaybolduysa (ekran değişti, kenara sıkıştı) geri çağır.
     func recenter() {
