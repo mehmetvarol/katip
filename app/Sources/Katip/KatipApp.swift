@@ -67,6 +67,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Kartın çerçevesi GERÇEKTEN akıyor mu? Yay matematiği ve iniş kararı
+        // ayrı ayrı test edildi ama ikisini pencereye bağlayan zincir (display
+        // link → setFrame) ancak burada görünüyor. Ekran gerekmiyor: pencere
+        // çerçevesini kare kare örnekliyoruz.
+        if CommandLine.arguments.contains("--hudprobe") {
+            let panel = HUDPanel()
+            panel.show()
+            let start = panel.frame
+            var samples: [(t: Double, w: CGFloat)] = []
+            let t0 = CACurrentMediaTime()
+            panel.update(state: .recording, level: 0.5)   // .collapsed → .listening
+
+            Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { timer in
+                samples.append((CACurrentMediaTime() - t0, panel.frame.width))
+                guard CACurrentMediaTime() - t0 > 0.7 else { return }
+                timer.invalidate()
+
+                print("başlangıç genişlik \(Int(start.width)) → hedef \(Int(panel.frame.width))")
+                print("\nyörünge (16 ms aralık):")
+                for s in samples where Int(s.t * 1000) % 48 < 20 {
+                    let filled = Int((s.w - start.width) / max(1, panel.frame.width - start.width) * 40)
+                    print(String(format: "  %4.0f ms  %6.1f px  %@", s.t * 1000, s.w,
+                                 String(repeating: "█", count: max(0, min(40, filled)))))
+                }
+                let distinct = Set(samples.map { Int($0.w) }).count
+                print("\nfarklı ara genişlik: \(distinct)")
+                print(distinct >= 5 ? "✔ çerçeve akıyor (sıçrama değil)"
+                                    : "✗ SIÇRAMA — animasyon çalışmıyor")
+                exit(distinct >= 5 ? 0 : 1)
+            }
+            return
+        }
+
         // Fiske → iniş noktası. Kartı elle savurmadan kararı doğrulamanın yolu.
         if CommandLine.arguments.contains("--flicktest") {
             let visible = NSRect(x: 0, y: 0, width: 1512, height: 900)
