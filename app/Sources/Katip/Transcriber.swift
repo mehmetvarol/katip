@@ -15,21 +15,34 @@ actor Transcriber {
 
     var isReady: Bool { pipe != nil }
 
-    /// Sözlük yönlendirmesi VARSAYILAN OLARAK KAPALI.
+    /// Sözlük yönlendirmesi AÇIK — ama sıkı bir token bütçesiyle.
     ///
-    /// Ölçüldü (M1 Pro, GPU, large-v3-turbo, 2026-08-18):
-    ///   sözlük açık:  1.9 sn ses → 4.00 sn · 6.3 sn ses → 4.52 sn
-    ///   sözlük kapalı: 1.9 sn ses → 1.72 sn · 6.3 sn ses → 2.18 sn
-    /// 109 prompt token'ı decoder bağlamına ekleniyor ve **~2.3 saniyeye** mal
-    /// oluyor — toplam gecikmenin yarısından fazlası. Test cümlelerinde çıktıya
-    /// katkısı ise sıfırdı (uzun cümlede sonuç birebir aynı).
+    /// Önce kapalıydı: 31 terimlik varsayılan liste 109 token tutuyor ve
+    /// ölçümde çeviriyi 1.7 → 4.0 sn'ye çıkarıyordu. Sonradan anlaşıldı ki
+    /// sorun sözlük fikri değil, **listenin uzunluğu ve alakasızlığı**.
     ///
-    /// Terminoloji düzeltmesini bedava yoldan yapıyoruz: `replacements.txt`
-    /// (0 ms, deterministik). Sözlük isteyen menüden açabilir.
+    /// Gerçek Türkçe kayıtla ölçüldü (10 sn'lik parça, 2026-08-21):
+    ///
+    ///     kapalı              0 token   2.11 sn   "localized storage'ta" ✗
+    ///     küçük+isabetli     23 token   2.58 sn   "localStorage'de"      ✓
+    ///     tam+alakasız      109 token   4.48 sn   "localized storage'ta" ✗
+    ///
+    /// Gecikme token başına doğrusal (~0.02 sn/token), yani bütçe doğrudan
+    /// bedeli belirliyor. Kazanç ise boyuttan değil **isabetten** geliyor:
+    /// 109 token'lık liste hiçbir şey düzeltmedi çünkü aradığımız terim
+    /// içinde yoktu.
     static var glossaryEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "useGlossary") }
+        get { UserDefaults.standard.object(forKey: "useGlossary") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "useGlossary") }
     }
+
+    /// Sözlüğe ayrılan token tavanı.
+    ///
+    /// Bütçe `promptTokens`'ın TAMAMI için 111 (`maxTokenContext / 2 - 1`) ve
+    /// bağlam yönlendirmesiyle PAYLAŞILIYOR. Bağlam daha değerli — cümlenin
+    /// ortasında olduğumuzu yalnızca o söyleyebiliyor — o yüzden sözlük 40
+    /// ile sınırlandı: 40 + 32 = 72, tavanın altında, ~0.8 sn'ye mal oluyor.
+    static let glossaryTokenBudget = 40
 
     /// Ölçüm için model/sözlük değiştirilebilir; uygulama varsayılanları kullanır.
     func load(model: String? = nil, useGlossary: Bool? = nil) async throws {
@@ -116,7 +129,7 @@ actor Transcriber {
             detectLanguage: false,
             skipSpecialTokens: true,
             withoutTimestamps: true,
-            promptTokens: prompt(for: context),
+            promptTokens: Self.fitsSingleWindow(samples) ? prompt(for: context) : nil,
             // Sessizlikte uydurma metin üretimine karşı (Türkçe'de "Altyazı M.K." tipi).
             noSpeechThreshold: 0.6
         )
@@ -136,6 +149,27 @@ actor Transcriber {
             return try await transcribe(samples, context: nil)
         }
         return Self.clean(text)
+    }
+
+    /// Ses tek bir Whisper penceresine (30 sn) sığıyor mu?
+    ///
+    /// ÖNEMLİ: `promptTokens` yalnızca burada güvenli. Çok pencereli
+    /// çözümlemede prompt, çıktının SESSİZCE KESİLMESİNE yol açıyor —
+    /// gerçek kayıtlarla ölçüldü (2026-08-21):
+    ///
+    ///     41 sn ses + 109 token → son iki cümle kayboldu, 7.2 → 23.0 sn
+    ///     38 sn ses +  23 token → metnin TAMAMI gitti, geriye son cümle kaldı
+    ///     10 sn ses +  23 token → tam metin, 2.11 → 2.58 sn, terim düzeldi
+    ///
+    /// Tekrar döngüsünü `Repetition` yakalıyor ama bu ONDAN FARKLI bir arıza:
+    /// çıktı bozuk değil, EKSİK — hiçbir sağlık göstergesi tetiklenmiyor.
+    /// Sessiz veri kaybına karşı tek savunma prompt'u hiç göndermemek.
+    ///
+    /// Canlı dikteyi etkilemiyor: VAD parçaları 4-13 sn arasında, hepsi tek
+    /// pencere. Asıl koruduğu yer "Yeniden çevir" — orada kaydın tamamı tek
+    /// çağrıda gidiyor ve 30 sn'yi rahatça aşıyor.
+    private static func fitsSingleWindow(_ samples: [Float]) -> Bool {
+        Double(samples.count) / 16_000 <= 28
     }
 
     // MARK: - Bağlam yönlendirme
@@ -178,14 +212,15 @@ actor Transcriber {
         guard !text.isEmpty else { return }
 
         let tokens = tokenizer.encode(text: " " + text)
-        // WhisperKit bütçe aşımında baştan kırpar; kaç terim kaybettiğimizi bilelim.
-        let budget = Constants.maxTokenContext / 2 - 1
-        if tokens.count >= budget {
-            Trace.log("sözlük \(tokens.count) token, bütçe \(budget) — BAŞTAKİ terimler kırpılacak")
+        // Kırpmayı WhisperKit'e bırakmıyoruz: o yalnızca 111'lik TOPLAM tavanı
+        // biliyor, bağlama yer ayırmayı bilmiyor. Sondan tutuyoruz çünkü
+        // dosyanın kuralı "en kritik terimler sona" (WhisperKit de suffix alır).
+        if tokens.count > Self.glossaryTokenBudget {
+            Trace.log("sözlük \(tokens.count) token — bütçe \(Self.glossaryTokenBudget), BAŞTAKİ terimler düşürüldü")
         } else {
-            Trace.log("sözlük yüklendi (\(tokens.count) token / \(budget) bütçe)")
+            Trace.log("sözlük yüklendi (\(tokens.count) token / \(Self.glossaryTokenBudget) bütçe)")
         }
-        promptTokens = tokens
+        promptTokens = Array(tokens.suffix(Self.glossaryTokenBudget))
     }
 
     /// Bilinen Whisper Türkçe halüsinasyon kalıpları — sessizlik/gürültü

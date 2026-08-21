@@ -36,21 +36,32 @@ enum Glossary {
         return terms.isEmpty ? defaultTerms : terms
     }
 
-    /// Bütçe yalnızca **111 token** (`Constants.maxTokenContext / 2 - 1`) ve
-    /// WhisperKit `.suffix()` ile SONU tutuyor → baştakiler düşer.
+    /// Bütçe **40 token** (`Transcriber.glossaryTokenBudget`) ve WhisperKit
+    /// gibi biz de SONU tutuyoruz → **kritik terimler listenin SONUNDA.**
     ///
-    /// Bu yüzden liste kısa ve sıralı: `refactor`/`deploy`/`endpoint` gibi yaygın
-    /// terimler HİÇ yok — P0 duman testinde ipucu olmadan da doğru çıktılar.
-    /// Bütçeyi Whisper'ın zaten bildiği kelimelere harcamanın anlamı yok.
-    /// En kritik/en nadir özel adlar en SONDA.
+    /// Liste ölçümle yeniden yazıldı (2026-08-21). Eski liste `refactor`,
+    /// `deploy`, `state` gibi yaygın terimleri BİLEREK dışarıda bırakıyordu —
+    /// gerekçe "P0 duman testinde ipucu olmadan da doğru çıktılar"dı. Gerçek
+    /// Türkçe kayıtlar bu varsayımı çürüttü; aynı terimler dikte içinde
+    /// şöyle çıktı:
+    ///
+    ///     state       → "sted"                deploy    → "Dipliya"
+    ///     persist     → "Persis"              cookie    → "COKEY"
+    ///     localStorage→ "localized storage"   Zustand   → "Zostan"
+    ///
+    /// Duman testi tek bir terimi sessiz bir bağlamda söylüyordu; gerçek
+    /// dikte terimi hızlı Türkçe bir cümlenin ORTASINDA söylüyor. İkincisi
+    /// çok daha zor ve ölçümü yapılması gereken tek şey oydu.
+    ///
+    /// Bütçe dar olduğu için liste kısa: kazanç boyuttan değil İSABETTEN
+    /// geliyor. 109 token'lık eski liste ölçümde hiçbir şey düzeltmedi ve
+    /// çeviriyi iki katına çıkardı, çünkü aranan terim içinde yoktu.
+    /// Hepsi gerçek kayıtta bozulmuş terimler; spekülatif giriş yok.
+    /// Sıra önemli — bütçe aşılırsa baştakiler düşer, o yüzden en sık
+    /// bozulanlar sonda.
     static let defaultTerms = [
-        "prop drilling", "optimistic update", "stale time", "reverse geocode",
-        "exponential backoff", "error boundary", "lazy load", "bundle size",
-        "test coverage", "environment variable", "sub agent",
-        "Claude Code", "MCP", "Shopify", "Next.js", "React Native", "App Router",
-        "ESP32", "CAN bus", "TPMS", "MQTT", "Home Assistant", "Shelly",
-        "Raspberry Pi", "Zustand", "TanStack Query", "Turbopack", "Netlify",
-        "Leaflet", "Vitest", "Fleet API",
+        "Claude Code", "Zustand", "middleware", "component",
+        "deploy", "cookie", "httpOnly", "persist", "state", "localStorage",
     ]
 
     private static var defaultFile: String {
@@ -58,10 +69,19 @@ enum Glossary {
         # Katip — teknik terim sözlüğü
         #
         # Whisper'a "bu kelimeleri böyle yaz" ipucu verir.
-        # ⚠️ SIRA ÖNEMLİ: bütçe sadece 111 token ve aşılırsa BAŞTAKİLER düşer
-        # (WhisperKit promptTokens.suffix ile sonu tutuyor).
+        #
+        # ⚠️ KISA TUT. Bütçe 40 token ve her token ~0.02 sn gecikme demek.
+        # Ölçüldü: isabetli 23 token'lık liste terimi düzeltti (+0.47 sn),
+        # alakasız 109 token'lık liste hiçbir şey düzeltmedi (+2.37 sn).
+        # Kazanç boyuttan değil isabetten geliyor.
+        #
+        # ⚠️ SIRA ÖNEMLİ: bütçe aşılırsa BAŞTAKİLER düşer.
         # En kritik / en nadir terimleri EN SONA yaz.
         # Uygulama açılışta gerçek token sayısını katip.log'a yazar.
+        #
+        # Buraya yalnızca DİKTEDE GERÇEKTEN BOZULAN terimleri ekle. Whisper'ın
+        # zaten doğru yazdığı bir kelimeye bütçe harcamak, gerçekten gereken
+        # bir terimi listeden düşürür.
         #
         # Her satırda virgülle ayrılmış terimler. '#' ile başlayan satırlar yok sayılır.
         # Değişiklik için uygulamayı yeniden başlat.
