@@ -7,6 +7,7 @@
 **macOS için tamamen yerel çalışan sesli dikte.**
 Türkçe konuş, içine İngilizce teknik terim serpiştir — imlecin olduğu yere yazsın.
 
+[![release](https://img.shields.io/github/v/release/mehmetvarol/katip)](https://github.com/mehmetvarol/katip/releases/latest)
 [![platform](https://img.shields.io/badge/macOS-14%2B-black)](#)
 [![engine](https://img.shields.io/badge/Whisper-large--v3--turbo-blue)](#)
 [![offline](https://img.shields.io/badge/100%25-offline-green)](#)
@@ -25,7 +26,7 @@ karışık dil durumu için Whisper tabanlı bir motor kullanıyor.
 - 〰️ Masaüstünde yüzen kart: canlı ses dalgası, kenara yapışma
 - 🔒 Kilit modunda **akan çeviri**, tek seferde yazma
 - 📴 Bulut yok, abonelik yok, ses cihazdan çıkmıyor
-- ⚡ ~1.75 sn / dikte (M1 Pro, Metal)
+- ⚡ ~0.43× gerçek zaman (M1 Pro, Metal) — 5 sn konuşma ~2.2 sn'de yazıya döner
 
 ## Kurulum
 
@@ -47,8 +48,11 @@ rm -rf /Applications/Katip.app && cp -R "$(brew --prefix katip)/Katip.app" /Appl
 git clone https://github.com/mehmetvarol/katip.git && cd katip/app && ./build.sh --run
 ```
 
-Üçü de **ad-hoc imzalar** (kimliksiz) — yani her güncellemede Mikrofon,
-Erişilebilirlik ve Giriş İzleme izinlerini yeniden vermen gerekir.
+İndirilen zip ve Homebrew **ad-hoc imzalı** (kimliksiz) — her güncellemede
+Mikrofon, Erişilebilirlik ve Giriş İzleme izinlerini yeniden vermen gerekir.
+Kaynaktan derleme farklı: kendi Apple Development kimliğin varsa (ücretsiz,
+Xcode ile otomatik oluşur) `build.sh` onu buluyor ve imza derlemeler arası
+SABİT kalıyor — izinler bir daha düşmez.
 
 > [!warning] İlk çalıştırmada Gatekeeper engelleyecek
 > **Sistem Ayarları → Gizlilik ve Güvenlik → aşağı kaydır → "Yine de Aç"**
@@ -81,24 +85,27 @@ tail -f ~/Library/Application\ Support/Katip/katip.log
 
 Masaüstünde duran, şekil değiştiren bir gösterge — boşta ince bir çizgi,
 fareyle üstüne gelince üç düğüme açılır (dil, mikrofon, kilit), konuşurken
-ses dalgasıyla genişler. Kenara sürükleyip yapıştırabilirsin.
+ses seviyesine tepki veren bir dalgayla genişler. Sürükleyip savurabilirsin —
+fizik tabanlı hareket kenara yapışır, ekran dışına asla tamamen çıkmaz.
 
 ## Diğer özellikler
 
 - **Geçmiş** (sağ tık → Geçmiş…) — aranabilir, 30 gün sonra otomatik silinir
+- **Yeniden çevir** — çeviri kötü çıktıysa geçmiş penceresinden aynı sesi
+  tekrar çevirtebilirsin. Canlı diktenin aksine ses parçalanmadan tek seferde
+  gidiyor, yani modele bütün bağlam birden veriliyor
+- **Sözlük** — sık bozulan teknik terimler için Whisper'a ipucu (varsayılan
+  açık, 10 terim); kendi terimlerini `glossary.txt`'e ekleyebilirsin
 - **Metin kısayolları** — söylediğin bir ifade hazır bir metin bloğuna genişler
 - **Projelerinden terim öğrenme** — `package.json` bağımlılıklarını tarayıp
   telaffuz kurallarını önerir (`Katip --learn ~/Desktop`)
 - **Girişte başlat** (sağ tık → Girişte başlat)
-- **Yeniden çevir** — çeviri kötü çıktıysa geçmiş penceresinden aynı sesi
-  tekrar çevirtebilirsin. Canlı diktenin aksine ses parçalanmadan tek seferde
-  gidiyor, yani modele bütün bağlam birden veriliyor.
 
 Ayarlar düz metin dosyaları olarak `~/Library/Application Support/Katip/` altında:
 
 | Dosya | Ne işe yarar |
 |---|---|
-| `glossary.txt` | Whisper'a terim ipucu (bütçe 111 token, kritik terimleri sona yaz) |
+| `glossary.txt` | Whisper'a terim ipucu (bütçe 40 token, kritik terimleri sona yaz) |
 | `replacements.txt` | `yanlış = doğru` düzeltme kuralları |
 | `snippets.txt` | `tetikleyici = uzun metin` kısayolları |
 | `history.jsonl` | Dikte geçmişi (düz metin, 30 gün) |
