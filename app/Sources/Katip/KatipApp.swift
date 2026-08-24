@@ -100,6 +100,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Bulanık terim eşleştirmesi: bilinen vakaları hâlâ yakalıyor mu,
+        // gerçek geçmişte yeni bir yanlış pozitif üretmiş mi? Eşik ölçümle
+        // seçildi (bkz. FuzzyTerms.swift); sözlük veya geçmiş değiştikçe bu
+        // sondayı tekrar çalıştırmak dengeyi bozup bozmadığını gösterir.
+        if CommandLine.arguments.contains("--fuzzytest") {
+            let terms = Glossary.load()
+            print("terimler: \(terms.joined(separator: ", "))\n")
+
+            let known: [(String, String)] = [
+                ("zostan", "Zustand"), ("persis", "persist"),
+                ("komponent", "component"), ("kompanent", "component"),
+            ]
+            print("═══ bilinen vakalar ═══")
+            var missed = 0
+            for (wrong, expected) in known {
+                if let m = FuzzyTerms.bestMatch(for: wrong, in: terms), m.term == expected {
+                    print("✔ \(wrong) → \(m.term)\(m.suffix)  (mesafe \(m.distance))")
+                } else {
+                    print("✗ \(wrong) → yakalanamadı (beklenen \(expected))")
+                    missed += 1
+                }
+            }
+
+            print("\n═══ geçmişte yanlış pozitif taraması ═══")
+            // GERÇEK zinciri yürütüyoruz: Replacements önce çalışır, "Zostan"
+            // gibi ÇOKTAN kesin kuralla kapatılmış vakalar FuzzyTerms'e hiç
+            // ulaşmaz. Sadece FuzzyTerms'i tek başına çalıştırmak, kural
+            // eklenmeden ÖNCEKİ eski geçmiş metnini test edip yanlış alarm
+            // verirdi.
+            let entries = History.shared.entries
+            var flagged = 0
+            let pattern = try! NSRegularExpression(pattern: "[\\p{L}]+")
+            for entry in entries {
+                let afterExact = Replacements.apply(to: entry.text)
+                let ns = afterExact as NSString
+                for match in pattern.matches(in: afterExact, range: NSRange(location: 0, length: ns.length)) {
+                    let word = ns.substring(with: match.range)
+                    guard let m = FuzzyTerms.bestMatch(for: word, in: terms) else { continue }
+                    let corrected = m.term + m.suffix
+                    guard corrected.lowercased() != word.lowercased() else { continue }
+                    flagged += 1
+                    print("⚠️  \"\(word)\" → \"\(corrected)\"  (mesafe \(m.distance))  — \(afterExact.prefix(60))")
+                }
+            }
+            print("\n\(entries.count) kayıt tarandı, \(flagged) yanlış pozitif")
+            let ok = missed == 0 && flagged == 0
+            print(ok ? "\n✔ sağlam" : "\n✗ dengesizlik var")
+            exit(ok ? 0 : 1)
+        }
+
         // Dalga GERÇEK bir kayıtla nasıl davranıyor? Seviyeleri kayıttan
         // çıkarıp animasyonun kendi kodundan geçiriyoruz — render'daki tek tek
         // seviyeler değil, zaman içindeki gerçek davranış.

@@ -148,7 +148,7 @@ actor Transcriber {
             Trace.log("bağlamlı çeviri tekrara düştü — bağlamsız yeniden deneniyor")
             return try await transcribe(samples, context: nil)
         }
-        return Self.clean(text)
+        return Self.clean(text, useGlossary: useGlossary)
     }
 
     /// Ses tek bir Whisper penceresine (30 sn) sığıyor mu?
@@ -240,15 +240,24 @@ actor Transcriber {
             .map(String.init).joined()
     }
 
-    private static func clean(_ text: String) -> String {
+    private static func clean(_ text: String, useGlossary: Bool) -> String {
         var out = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !hallucinations.contains(canonicalForHallucinationCheck(out)) else { return "" }
 
         out = out.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         out = FillerWords.strip(from: out)
+        out = Replacements.apply(to: out)
+
+        // Bulanık terim eşleştirmesi sözlük kapalıyken çalışmıyor: sözlük
+        // KAPALI demek kullanıcı terim düzeltmesini hiç istemiyor demek,
+        // bulanık eşleştirme de aynı ailenin bir parçası.
+        if useGlossary {
+            out = FuzzyTerms.correct(out, terms: Glossary.load())
+        }
+
         // Sıra önemli: önce yanlış duyulanı düzelt, sonra kısayolu genişlet.
         // Tersi olsaydı yanlış duyulmuş bir tetikleyici hiç eşleşmezdi.
-        return Snippets.apply(to: Replacements.apply(to: out))
+        return Snippets.apply(to: out)
     }
 
     enum TranscriberError: LocalizedError {
