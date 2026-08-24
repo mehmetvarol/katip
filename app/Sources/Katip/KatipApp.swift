@@ -295,6 +295,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             exit(ok ? 0 : 1)
         }
 
+        // Canlı log'da p90 8.88 sn, --selftest'te AYNI kayıt 3.03 sn — 3 kat
+        // fark. Şüphe: dikte SÜRERKEN dalga animasyonu 120 Hz'de GPU'da çiziyor,
+        // Whisper'ın Metal çevirisi de aynı GPU'yu kullanıyor. Bu sondanın işi
+        // bu şüpheyi doğrulamak: AYNI transcribe() çağrısını bir kez hiçbir
+        // pencere yokken, bir kez production'daki gibi kart canlı animasyon
+        // gösterirken çalıştırıp KIYASLIYOR — tahmin değil, ölçüm.
+        if let index = CommandLine.arguments.firstIndex(of: "--gpuprobe") {
+            guard let path = CommandLine.arguments.dropFirst(index + 1).first,
+                  let samples = try? Self.readAudio(at: path) else {
+                print("kullanım: Katip --gpuprobe <kayıt.wav>"); exit(2)
+            }
+            Task {
+                print("• ses: \(String(format: "%.1f", Double(samples.count) / 16000)) sn\n")
+                let transcriber = Transcriber()
+                try? await transcriber.load()
+
+                func run(_ runs: Int) async -> [Double] {
+                    var times: [Double] = []
+                    for _ in 0..<runs {
+                        let t0 = Date()
+                        _ = try? await transcriber.transcribe(samples)
+                        times.append(Date().timeIntervalSince(t0))
+                    }
+                    return times
+                }
+
+                print("═══ Pencere YOK (izole, --selftest gibi) ═══")
+                let baseline = await run(3)
+                for (i, t) in baseline.enumerated() { print(String(format: "  tur %d: %.2f sn", i+1, t)) }
+
+                print("\n═══ Kart CANLI animasyon gösterirken (production .locked hâli) ═══")
+                let panel = HUDPanel()
+                panel.show()
+                // Gerçek akış döngüsü 150 ms'de bir seviye güncelliyor
+                // (DictationController.startStreaming) — aynı temposu taklit
+                // ediyoruz ki GPU yükü production'la BİREBİR eşleşsin.
+                let ticker = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { _ in
+                    panel.update(state: .locked, level: Float.random(in: 0.15...0.35))
+                }
+                RunLoop.main.add(ticker, forMode: .common)
+                try? await Task.sleep(for: .milliseconds(300))   // animasyon otursun
+
+                let withHUD = await run(3)
+                ticker.invalidate()
+                for (i, t) in withHUD.enumerated() { print(String(format: "  tur %d: %.2f sn", i+1, t)) }
+
+                let baseAvg = baseline.reduce(0,+) / Double(baseline.count)
+                let hudAvg = withHUD.reduce(0,+) / Double(withHUD.count)
+                let ratio = hudAvg / baseAvg
+                print(String(format: "\nortalama: pencere yok %.2f sn  ·  kart canlıyken %.2f sn  ·  oran %.2fx", baseAvg, hudAvg, ratio))
+                print(ratio > 1.5 ? "\n✗ GPU çakışması DOĞRULANDI" : "\n✔ fark önemsiz — sebep başka yerde")
+                exit(ratio > 1.5 ? 1 : 0)
+            }
+            return
+        }
+
         // Takılma teşhisi: uzun bir hareket boyunca kare temposunu ölçer.
         // "Akmıyor" şikâyetinin sebebi kare atlama mı, yoksa kare başına iş
         // süresi mi — gözle ayırt edilemez, sayıyla ayırt edilir.

@@ -224,12 +224,18 @@ final class DictationController {
         sessionAudio.append(contentsOf: samples)
         do {
             let started = Date()
+            let cpuStart = SystemLoad.cpuTime()
             // Bağlam uzun duraklamadan sonra da veriliyor: kuyruk noktayla
             // bitiyorsa model zaten yeni cümleye büyük harfle başlıyor, ve
             // terminoloji bağlamı iki cümle boyunca korunuyor.
             let carry = context.isEmpty ? nil : context
             let text = try await transcriber.transcribe(samples, context: carry)
-            Trace.log("çeviri \(String(format: "%.2f", Date().timeIntervalSince(started))) sn → \"\(text)\"")
+
+            let wall = Date().timeIntervalSince(started)
+            let cpu = SystemLoad.cpuTime() - cpuStart
+            // cpu ≪ wall: darboğaz DIŞARIDA (başka iş CPU/GPU paylaşıyor).
+            // cpu ≈ wall: darboğaz BİZİM hesaplamamızda (bkz. SystemLoad.swift).
+            Trace.log("çeviri \(String(format: "%.2f", wall)) sn (cpu \(String(format: "%.2f", cpu)) sn, yük \(String(format: "%.1f", SystemLoad.loadAverage())), termal \(SystemLoad.thermalState())) → \"\(text)\"")
             guard !text.isEmpty else { return }
             pieces.append(text)
             context = String((context + " " + text).suffix(200))
