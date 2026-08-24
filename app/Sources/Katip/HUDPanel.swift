@@ -524,7 +524,7 @@ final class HUDPanel: NSPanel {
 /// (etiket + üç daire) tek pencerede çizebilmek; blur'lu tek dikdörtgenle bu
 /// mümkün değildi.
 @MainActor
-private final class CardView: NSView {
+private final class CardView: NSView, NSViewToolTipOwner {
     var onAction: ((HUDPanel.Action) -> Void)?
     var onHoverChange: ((Bool) -> Void)?
 
@@ -614,6 +614,44 @@ private final class CardView: NSView {
             rect: bounds,
             options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
             owner: self))
+        updateToolTips()
+    }
+
+    /// Her düğme için gerçek (sistemin kendi) araç ipucu. Çizim/tıklama/ipucu
+    /// AYNI `plan()` çağrısından besleniyor — üçü ayrı hesaplansa, biri
+    /// güncellenip diğeri unutulduğunda sessizce birbirinden sapar.
+    ///
+    /// Doğrudan neden: "kilit" düğmesinin ikonu hiç değişmiyordu ve
+    /// kullanıcı ne işe yaradığını anlayamadı. İkon düzeltmesi yeterli
+    /// olabilirdi ama Katip zaten çok az kelimeyle çalışan bir arayüz —
+    /// gerçek bir tooltip şüpheye hiç yer bırakmıyor.
+    private var toolTipText: [NSView.ToolTipTag: String] = [:]
+
+    private func updateToolTips() {
+        removeAllToolTips()
+        toolTipText.removeAll()
+        for (action, rect) in plan().buttons {
+            let tag = addToolTip(rect, owner: self, userData: nil)
+            toolTipText[tag] = toolTip(for: action)
+        }
+    }
+
+    private func toolTip(for action: HUDPanel.Action) -> String {
+        switch action {
+        case .language: "Dikte dili"
+        case .dictate:  "Diktele"
+        case .lock:     state == .locked ? "Kilidi aç — dikteyi bitir"
+                                          : "Elini çekmeden sürekli dinle (kilit modu)"
+        case .cancel:   "İptal et"
+        case .finish:   "Bitir ve yaz"
+        case .copyText: "Kopyala"
+        case .dismiss:  "Kapat"
+        }
+    }
+
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
+             userData: UnsafeMutableRawPointer?) -> String {
+        toolTipText[tag] ?? ""
     }
 
     override func mouseEntered(with event: NSEvent) { onHoverChange?(true) }
@@ -985,8 +1023,13 @@ private final class CardView: NSView {
     private func symbolName(_ action: HUDPanel.Action) -> String {
         switch action {
         case .language: "globe"
-        case .dictate:  state == .locked ? "lock.fill" : "mic.fill"
-        case .lock:     "record.circle"
+        // Her düğme TEK bir anlamı taşısın: dictate hep mikrofon, kilit
+        // durumu SADECE .lock düğmesinde okunsun. Önceden ikisi de kilit
+        // bilgisini gösteriyordu (dictate lock.fill'e dönüyordu, .lock ise
+        // hiç değişmeyen bir "record.circle" idi) — kullanıcı hangi
+        // düğmenin ne yaptığını ayırt edemiyordu.
+        case .dictate:  "mic.fill"
+        case .lock:     state == .locked ? "lock.fill" : "lock.open.fill"
         case .cancel:   "xmark"
         case .finish:   "checkmark"
         case .dismiss:  "xmark"
