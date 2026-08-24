@@ -419,17 +419,6 @@ final class DictationController {
 
     /// Karttaki kilit düğmesi. Kayıt yoksa başlatıp doğrudan kilide geçer —
     /// çift-basışla aynı sonuca fareyle de ulaşılsın.
-    func lock() {
-        switch state {
-        case .locked: finish()
-        case .recording: state = .locked
-        case .idle, .error:
-            begin()
-            if state == .recording { state = .locked }
-        default: onIgnoredClick?("Model hâlâ hazır değil.")
-        }
-    }
-
     // MARK: - Dikte dili
 
     /// Menüde sunulan diller. Whisper zaten çok dilli olduğu için ek dil

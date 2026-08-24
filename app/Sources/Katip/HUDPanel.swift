@@ -17,7 +17,7 @@ final class HUDPanel: NSPanel {
 
     /// Karttan çıkan kullanıcı eylemleri. Panel hiçbirini kendi yorumlamaz —
     /// karar tek durum makinesinde (DictationController) kalsın.
-    enum Action { case dictate, finish, cancel, lock, language, copyText, dismiss }
+    enum Action { case dictate, finish, cancel, language, copyText, dismiss }
 
     enum Mode: Equatable {
         case collapsed
@@ -565,7 +565,7 @@ private final class CardView: NSView, NSViewToolTipOwner {
         // duran bir çubuk, açıldığında pencere gibi büyümemeli.
         switch mode {
         case .collapsed: NSSize(width: 58, height: 18)
-        case .expanded:  NSSize(width: 108, height: 58)
+        case .expanded:  NSSize(width: 88, height: 58)
         case .listening: NSSize(width: 112, height: 26)
         case .notice(let text): NSSize(width: min(280, max(132, textWidth(text, 10) + 62)), height: 26)
         case .result:    NSSize(width: 224, height: 116)
@@ -639,9 +639,10 @@ private final class CardView: NSView, NSViewToolTipOwner {
     private func toolTip(for action: HUDPanel.Action) -> String {
         switch action {
         case .language: "Dikte dili"
-        case .dictate:  "Diktele"
-        case .lock:     state == .locked ? "Kilidi aç — dikteyi bitir"
-                                          : "Elini çekmeden sürekli dinle (kilit modu)"
+        // Tıkla → başlar, elini çek, tekrar tıkla → biter. Aynı jestin
+        // klavye karşılığı için ayrı bir ipucu gerekmiyor; kısayol
+        // etiketi zaten karttaki "Dikte ⌥" satırında görünüyor.
+        case .dictate:  "Tıkla — elini çekmeden dikte, tekrar tıkla → bitir"
         case .cancel:   "İptal et"
         case .finish:   "Bitir ve yaz"
         case .copyText: "Kopyala"
@@ -850,11 +851,18 @@ private final class CardView: NSView, NSViewToolTipOwner {
         case .expanded:
             // Düğme sırası ALTTA, etiket ÜSTTE — fare çubuğun olduğu yerde kalsın
             // diye kart yukarı doğru açılıyor.
+            //
+            // ÜÇÜNCÜ bir "kilit" düğmesi VARDI, kaldırıldı: fare tıklaması
+            // klavyenin "basılı tut"u gibi ÇALIŞAMIYOR (tıklama an be an,
+            // basılı kalmıyor), yani mikrofona tıklamak zaten "elini çek,
+            // tekrar tıklayana kadar dinle" demekti — kilit modunun tanımının
+            // AYNISI. Kullanıcı ikisinin de aynı işi yaptığını fark etti;
+            // ikisi GERÇEKTEN aynı işi yapıyordu. Kilit artık sadece
+            // klavyenin çift-bas jestinde yaşıyor.
             let cy: CGFloat = 17
             l.buttons = [
-                (.language, circle(x: bounds.midX - 32, y: cy, d: 24)),
-                (.dictate,  circle(x: bounds.midX,      y: cy, d: 30)),
-                (.lock,     circle(x: bounds.midX + 32, y: cy, d: 24)),
+                (.language, circle(x: bounds.midX - 21, y: cy, d: 24)),
+                (.dictate,  circle(x: bounds.midX + 18, y: cy, d: 30)),
             ]
             let width = min(bounds.width - 6, Self.textWidth(hintTitle, 10) + 18)
             l.label = NSRect(x: bounds.midX - width / 2, y: 37, width: width, height: 20)
@@ -1023,13 +1031,7 @@ private final class CardView: NSView, NSViewToolTipOwner {
     private func symbolName(_ action: HUDPanel.Action) -> String {
         switch action {
         case .language: "globe"
-        // Her düğme TEK bir anlamı taşısın: dictate hep mikrofon, kilit
-        // durumu SADECE .lock düğmesinde okunsun. Önceden ikisi de kilit
-        // bilgisini gösteriyordu (dictate lock.fill'e dönüyordu, .lock ise
-        // hiç değişmeyen bir "record.circle" idi) — kullanıcı hangi
-        // düğmenin ne yaptığını ayırt edemiyordu.
         case .dictate:  "mic.fill"
-        case .lock:     state == .locked ? "lock.fill" : "lock.open.fill"
         case .cancel:   "xmark"
         case .finish:   "checkmark"
         case .dismiss:  "xmark"

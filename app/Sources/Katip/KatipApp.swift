@@ -682,7 +682,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .dictate:  controller.toggle()
         case .finish:   controller.toggle()
         case .cancel:   controller.cancel()
-        case .lock:     controller.lock()
         case .language: showLanguageMenu()
         case .copyText:
             NSPasteboard.general.clearContents()
