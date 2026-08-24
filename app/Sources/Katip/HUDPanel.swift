@@ -466,6 +466,30 @@ final class HUDPanel: NSPanel {
         }
     }
 
+    /// Bir ses kaydını dalga animasyonunun KENDİ kodundan geçirir.
+    ///
+    /// `renderSample` tek tek seviyeleri gösteriyor; burada ölçtüğümüz şey
+    /// zaman içindeki davranış — uyarlanır kazanç ancak böyle sınanabilir.
+    static func waveTrace(samples: [Float]) -> [(level: CGFloat, height: CGFloat)] {
+        let card = CardView(frame: NSRect(x: 0, y: 0, width: 112, height: 26))
+        card.mode = .listening
+
+        let window = 1365            // 4096 kare @48kHz ≈ 85 ms
+        let framesPerBuffer = 10     // 85 ms ≈ 10 kare @120 Hz
+        var out: [(CGFloat, CGFloat)] = []
+
+        var i = 0
+        while i + window < samples.count {
+            var peak: Float = 0
+            for j in i..<(i + window) { peak = max(peak, abs(samples[j])) }
+            card.apply(state: .recording, level: peak)
+            for _ in 0..<framesPerBuffer { card.advance(1.0 / 120) }
+            out.append((CGFloat(peak), card.currentLevels[card.currentLevels.count / 2]))
+            i += window
+        }
+        return out
+    }
+
     /// Geliştirme yardımcısı: bir biçimi PNG'ye render eder.
     /// Ekran görüntüsü izni olmadan görünümü doğrulamak için — kartın bomboş
     /// çıktığı hatayı bir kez ancak böyle yakalayabildik.
@@ -660,24 +684,34 @@ private final class CardView: NSView {
             // Ataklı zarf: sese HIZLI yüksel, yavaş in. Simetrik yumuşatma
             // konuşmanın vuruşunu ezip animasyonu cansız gösteriyordu.
             // Zaman sabitleri saniye: yükselişte 20 ms, inişte 110 ms.
-            let raw = min(1, CGFloat(inputLevel) * Self.levelGain)
+            // UYARLANIR kazanç. Sabit kazanç çalışmıyor çünkü oturumlar
+            // arasında 3 KAT fark var — gerçek kayıtlardan ölçüldü (tampon
+            // başına tepe, konuşma anları):
+            //
+            //     kısık oturum   p50 0.045   p90 0.067   max 0.095
+            //     yüksek oturum  p50 0.143   p90 0.235   max 0.438
+            //
+            // Sabit 2.5 kazançla kısık oturum kapının hemen üstünde kalıyor ve
+            // dalga konuşurken bile DÜMDÜZ görünüyordu (kullanıcı bildirdi).
+            // Referansı son saniyelerin tepesinden alıyoruz: mikrofon uzak da
+            // olsa yakın da olsa konuşma tam yüksekliğe çıkıyor.
+            let level = CGFloat(inputLevel)
+            loudest = max(level, loudest * exp(-Self.referenceDecay * dt))
+
+            // MUTLAK kapı — VAD'in konuşma eşiğiyle aynı. Uyarlanır kazancın
+            // tek riski sessizlikte gürültüyü şişirmek; bunu engelleyen bu.
+            let speaking = level > Self.speechFloor
+            let reference = max(loudest, Self.minimumReference)
+            let raw = speaking ? min(1, level / reference) : 0
+
             let tau: CGFloat = raw > energy ? 0.020 : 0.110
             energy += (raw - energy) * (1 - exp(-dt / tau))
             phase += Self.waveSpeed * dt
 
-            // Dinamik aralığı GENİŞLET. Eskiden kazanç 0.143'te doyduğu için
-            // her hece tavandaydı ve sessizlik bile belirgin dalga üretiyordu —
-            // yani aralık yoktu, animasyon "hep aynı" görünüyordu. İki adım:
-            //
-            //   kapı: gürültü tabanını dibe indirir → sessizlik DÜMDÜZ
-            //   eğri: kapının üstünde kalan bandı yayar → kısık konuşma da görünür
-            //
-            // Eğri üssü 1'in ALTINDA. Önce 1.3 denendi ("düşükleri bastır"
-            // mantığıyla) ve render'da görüldü ki gerçek kısık konuşma (tepe
-            // 0.10) dümdüz çıkıyor — kapı sessizliği zaten hallediyor, üstüne
-            // 1'den büyük üs koymak konuşmanın alt yarısını da eziyordu.
-            let gated = max(0, (energy - Self.noiseFloor) / (1 - Self.noiseFloor))
-            let punch = pow(gated, 0.7)
+            // Kapı zaten sessizliği hallediyor; buradaki eğri konuşmanın alt
+            // yarısını yukarı çekiyor (üs 1'in ALTINDA — 1.3 denendi ve gerçek
+            // kısık konuşmayı dümdüz bıraktığı render'da görüldü).
+            let punch = pow(energy, 0.7)
 
             shape { index, x in
                 // Ortada yüksek, uçlarda sönen siluet × soldan sağa akan dalga.
@@ -711,27 +745,30 @@ private final class CardView: NSView {
     }
 
     /// Dalganın akış hızı, radyan/saniye. Eski 30 Hz × 0.34 rad/kare ile aynı.
-    /// Ham tepe seviyeyi 0-1'e taşıyan kazanç.
-    ///
-    /// Eskiden 7'ydi ve **0.143'te doyuyordu** — gerçek log'a göre sıradan
-    /// konuşma 0.2-0.4 arasında, yani her hece tavana yapışıyordu ve dalga
-    /// "hep aynı" görünüyordu. Kazanç gerçek aralığa göre seçildi:
-    ///
-    ///     gerçek ölçüm (katip.log)   sessizlik 0.035 · konuşma 0.216 · yüksek 0.562
-    ///     kazanç 2.5 ile             0.09           · 0.54          · 1.00
-    ///
-    /// Artık konuşmanın vuruşu aralığın ORTASINA düşüyor, tavanına değil.
-    private static let levelGain: CGFloat = 2.5
+    /// Referansın sönme hızı (1/sn). ~3 saniyede yarıya iner: konuşmanın
+    /// tepesini hatırlayacak kadar uzun, sesini alçalttığında uyum sağlayacak
+    /// kadar kısa.
+    private static let referenceDecay: CGFloat = 0.231
 
-    /// Bunun altındaki enerji ses değil, mikrofon gürültü tabanı sayılır.
-    /// VAD'in konuşma eşiği 0.03 tepe → kazançla 0.075; kapıyı onun hemen
-    /// altına koyuyoruz ki ortam gürültüsü dümdüz kalsın.
-    private static let noiseFloor: CGFloat = 0.06
+    /// Referansın alt sınırı. Bu olmasaydı tamamen sessiz bir odada uyarlanır
+    /// kazanç mikrofon gürültüsünü tavana çıkarırdı.
+    private static let minimumReference: CGFloat = 0.05
+
+    /// Bunun altı konuşma sayılmaz — `SpeechSegmenter.speechPeak` ile aynı
+    /// değer. İki yer aynı eşiği kullanmalı: VAD'in "konuşma yok" dediği anda
+    /// dalganın kıpırdaması yalan olur.
+    private static let speechFloor: CGFloat = 0.03
 
     private static let waveSpeed: CGFloat = 0.34 * 30
     private static let pulseSpeed: CGFloat = 0.22 * 30
 
     private var inputLevel: Float = 0
+
+    /// Son saniyelerin en yüksek seviyesi — uyarlanır kazancın referansı.
+    private var loudest: CGFloat = 0
+
+    /// Sonda için: çubukların anlık yüksekliği (0-1).
+    var currentLevels: [CGFloat] { levels }
 
     /// Ekran karesi istiyor mu? Yalnızca hareketli durumlarda — boşta display
     /// link'i döndürmenin anlamı yok.

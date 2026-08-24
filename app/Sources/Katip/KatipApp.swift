@@ -100,6 +100,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Dalga GERÇEK bir kayıtla nasıl davranıyor? Seviyeleri kayıttan
+        // çıkarıp animasyonun kendi kodundan geçiriyoruz — render'daki tek tek
+        // seviyeler değil, zaman içindeki gerçek davranış.
+        if let index = CommandLine.arguments.firstIndex(of: "--waveprobe") {
+            guard let path = CommandLine.arguments.dropFirst(index + 1).first,
+                  let samples = try? Self.readAudio(at: path) else {
+                print("kullanım: Katip --waveprobe <kayıt.wav>"); exit(2)
+            }
+            let bars = HUDPanel.waveTrace(samples: samples)
+
+            let blocks = Array(" ▁▂▃▄▅▆▇█")
+            print("kayıt: \((path as NSString).lastPathComponent)  ·  \(bars.count) tampon\n")
+            print("seviye  " + String(bars.map { blocks[min(8, Int($0.level / 0.05 * 2))] }))
+            print("dalga   " + String(bars.map { blocks[min(8, Int($0.height * 8.99))] }))
+
+            // SÜREKLİ sessizlik: kendisi ve önceki ~0.5 sn sessiz olan tamponlar.
+            // Konuşmanın hemen ardındaki tamponu "sessiz" saymak yanlış ölçüm —
+            // orada dalga daha sönüyor ve sönme kuyruğu İSTENEN davranış.
+            let quiet = bars.indices
+                .filter { i in i >= 6 && (max(0, i - 6)...i).allSatisfy { bars[$0].level <= 0.03 } }
+                .map { bars[$0].height }
+            let loud  = bars.filter { $0.level > 0.03 }.map(\.height)
+            func avg(_ xs: [CGFloat]) -> CGFloat { xs.isEmpty ? 0 : xs.reduce(0,+) / CGFloat(xs.count) }
+            print(String(format: "\nsürekli sessizlik (%d tampon): ort %.2f · en yüksek %.2f",
+                         quiet.count, avg(quiet), quiet.max() ?? 0))
+            print(String(format: "konuşma   (%d tampon): ort %.2f · en yüksek %.2f",
+                         loud.count, avg(loud), loud.max() ?? 0))
+            let ok = avg(quiet) < 0.08 && avg(loud) > 0.30
+            print(ok ? "\n✔ sessizlik düz, konuşma belirgin" : "\n✗ ayrım yetersiz")
+            exit(ok ? 0 : 1)
+        }
+
         // GERÇEK kod yolunda köşeye savurma. --boundsprobe yalnızca yay
         // matematiğini sınıyor; buradaki dizi setDragging → applyHover →
         // setMode → resize etkileşimini de içeriyor.
@@ -302,16 +334,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             HUDPanel.renderSample(mode: .listening, levels: wave,
                                   to: dir + "/card-listening.png", ticks: 16)
-            // Ses seviyesine tepki: sessizlik ile konuşma arasındaki fark
-            // gözle görülebilmeli, yoksa "canlı" iddiası ölçülemez.
-            // Seviyeler katip.log'daki GERÇEK ölçümlerden: sessiz kayıt 0.035,
-            // normal konuşma 0.216, yüksek 0.562.
-            for (name, level) in [("sessiz", Float(0.003)), ("ortam", 0.035),
-                                  ("kisik", 0.10), ("konusma", 0.216), ("yuksek", 0.562)] {
-                HUDPanel.renderSample(mode: .listening, levels: wave,
-                                      to: dir + "/card-seviye-\(name).png",
-                                      ticks: 40, level: level)
-            }
+            // NOT: buradaki "seviye" render'ları KALDIRILDI. Kazanç artık
+            // uyarlanır olduğu için sabit bir seviyeyi beslemek anlamsız —
+            // referans o seviyeye yakınsıyor ve her seviye aynı görünüyor.
+            // Yerini `--waveprobe <kayıt.wav>` aldı: gerçek bir kaydı zaman
+            // içinde geçirip sessizlik/konuşma ayrımını sayıyla veriyor.
             HUDPanel.renderSample(mode: .notice("Mikrofon izni yok"), levels: flat,
                                   to: dir + "/card-notice.png")
             HUDPanel.renderSample(mode: .result("Şu component'i refactor edelim, state yönetimi Zustand'a geçsin."),
