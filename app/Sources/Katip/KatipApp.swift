@@ -449,6 +449,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   to: dir + "/card-notice.png")
             HUDPanel.renderSample(mode: .result("Şu component'i refactor edelim, state yönetimi Zustand'a geçsin."),
                                   levels: flat, to: dir + "/card-result.png")
+            LanguageMenu.renderSample(to: dir + "/language-menu.png")
             print("render edildi: \(dir)")
             exit(0)
         }
@@ -696,11 +697,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (varsayılan "tr") doğru çıkıyor — birden fazla dil işaretlemek yalnızca
     /// hangi dilde konuşacağın BELİRSİZSE anlamlı, çünkü her ek dil ayrı bir
     /// tam çeviri geçişi demek (bkz. Transcriber.transcribe).
+    ///
+    /// Native `NSMenu` DEĞİL — `LanguageMenu` kartla aynı koyu yüzeyi
+    /// paylaşıyor (bkz. Palette.swift) ve her tıklamada kapanmıyor, çoklu
+    /// seçimde menüyü tekrar tekrar açmana gerek kalmıyor.
+    private var languageMenu: LanguageMenu?
+
     private func showLanguageMenu() {
-        let menu = buildLanguageMenu()
-        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        let menu = LanguageMenu(rows: languageMenuRows())
+        menu.onSelect = { [weak self] index in self?.handleLanguageMenuSelection(index) }
+        menu.show(near: NSEvent.mouseLocation)
+        languageMenu = menu
     }
 
+    private func languageMenuRows() -> [LanguageMenu.Row] {
+        var rows = [LanguageMenu.Row(title: "Otomatik algıla", isChecked: controller.isAutoLanguage,
+                                     isSeparatorAfter: true)]
+        for choice in DictationController.LanguageChoice.allCases {
+            rows.append(LanguageMenu.Row(title: choice.title, isChecked: controller.isLanguageSelected(choice)))
+        }
+        return rows
+    }
+
+    private func handleLanguageMenuSelection(_ index: Int) {
+        if index == 0 {
+            controller.setAutoLanguage()
+        } else {
+            let choice = DictationController.LanguageChoice.allCases[index - 1]
+            controller.toggleLanguage(choice)
+        }
+        // Panel AÇIK kalıyor — checklist gibi, kullanıcı istediği kadar dil
+        // işaretleyebilsin. Sadece onay işaretlerini güncelliyoruz.
+        languageMenu?.update(rows: languageMenuRows())
+    }
+
+    /// Durum çubuğu menüsü için — orası zaten native (hotkey/sözlük de öyle),
+    /// tutarlılık için burada da native kalıyor. Sadece kartın açılır paneli
+    /// özel çizim kullanıyor.
     private func buildLanguageMenu() -> NSMenu {
         let menu = NSMenu()
         let auto = NSMenuItem(title: "Otomatik algıla", action: #selector(pickAutoLanguage), keyEquivalent: "")

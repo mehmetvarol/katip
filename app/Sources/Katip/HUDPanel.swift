@@ -578,13 +578,18 @@ private final class CardView: NSView {
 
     // MARK: Palet — referans koyu yüzeye sabitlenmiş
 
-    private static let surface   = NSColor(white: 0.10, alpha: 0.94)
-    private static let control   = NSColor(white: 1.0, alpha: 0.13)
-    private static let controlUp = NSColor(white: 1.0, alpha: 0.22)   // fare üstündeyken
-    private static let primary   = NSColor(white: 1.0, alpha: 0.96)   // ✓ dolu daire
-    private static let glyph     = NSColor(white: 1.0, alpha: 0.92)
-    private static let muted     = NSColor(white: 1.0, alpha: 0.42)
-    private static let wave      = NSColor(white: 1.0, alpha: 0.62)
+    // Renkler artık Palette.swift'te — CardView'in KENDİSİ `private`, yani
+    // bu sabitler burada kalsaydı dosya dışından erişilemezdi. LanguageMenu
+    // gibi kartla AYNI yüzeyde görünmesi gereken diğer pencereler oradan
+    // çekiyor; burada da kısayol olarak duruyor ki mevcut çizim kodu
+    // değişmesin.
+    private static let surface   = Palette.surface
+    private static let control   = Palette.control
+    private static let controlUp = Palette.controlUp
+    private static let primary   = Palette.primary
+    private static let glyph     = Palette.glyph
+    private static let muted     = Palette.muted
+    private static let wave      = Palette.wave
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
