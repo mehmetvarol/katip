@@ -559,6 +559,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(findItem)
         menu.addItem(.separator())
 
+        let languageItem = NSMenuItem(title: "Dikte Dili (\(controller.languageLabel))", action: nil, keyEquivalent: "")
+        languageItem.submenu = buildLanguageMenu()
+        menu.addItem(languageItem)
+
         let hotkeyItem = NSMenuItem(title: "Kısayol tuşu", action: nil, keyEquivalent: "")
         let hotkeyMenu = NSMenu()
         for choice in HotkeyChoice.allCases {
@@ -678,13 +682,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .finish:   controller.toggle()
         case .cancel:   controller.cancel()
         case .lock:     controller.lock()
-        case .language: flash("Dikte dili: \(controller.cycleLanguage())")
+        case .language: showLanguageMenu()
         case .copyText:
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(controller.lastTranscript, forType: .string)
             hud?.dismissOverlay()
         case .dismiss:  hud?.dismissOverlay()
         }
+    }
+
+    /// Küre düğmesi: sabit sıradan geçmek yerine işaretlenebilir bir liste
+    /// açılıyor. Türkçe+İngilizce gibi karışık cümleler zaten TEK dilde
+    /// (varsayılan "tr") doğru çıkıyor — birden fazla dil işaretlemek yalnızca
+    /// hangi dilde konuşacağın BELİRSİZSE anlamlı, çünkü her ek dil ayrı bir
+    /// tam çeviri geçişi demek (bkz. Transcriber.transcribe).
+    private func showLanguageMenu() {
+        let menu = buildLanguageMenu()
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
+    private func buildLanguageMenu() -> NSMenu {
+        let menu = NSMenu()
+        let auto = NSMenuItem(title: "Otomatik algıla", action: #selector(pickAutoLanguage), keyEquivalent: "")
+        auto.target = self
+        auto.state = controller.isAutoLanguage ? .on : .off
+        menu.addItem(auto)
+        menu.addItem(.separator())
+        for choice in DictationController.LanguageChoice.allCases {
+            let item = NSMenuItem(title: choice.title, action: #selector(toggleLanguageItem(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = choice.rawValue
+            item.state = controller.isLanguageSelected(choice) ? .on : .off
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc private func pickAutoLanguage() {
+        controller.setAutoLanguage()
+        flash("Dikte dili: \(controller.languageLabel)")
+    }
+
+    @objc private func toggleLanguageItem(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let choice = DictationController.LanguageChoice(rawValue: raw) else { return }
+        controller.toggleLanguage(choice)
+        flash("Dikte dili: \(controller.languageLabel)")
     }
 
     private func hideHUD() {
@@ -945,7 +988,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 var clock = Date()
                 try await transcriber.load(model: model, useGlossary: useGlossary)
                 if let li = args.firstIndex(of: "--lang"), let lang = args.dropFirst(li + 1).first {
-                    await transcriber.setLanguage(lang == "auto" ? nil : lang)
+                    let selection: Transcriber.LanguageSelection = lang == "auto"
+                        ? .auto : .fixed(lang.split(separator: ",").map(String.init))
+                    await transcriber.setLanguages(selection)
                     print("• dil: \(lang)")
                 }
                 print("  hazır (\(String(format: "%.1f", Date().timeIntervalSince(clock))) sn)")

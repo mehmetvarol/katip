@@ -73,7 +73,7 @@ final class DictationController {
             do {
                 Trace.log("model yükleniyor…")
                 try await transcriber.load()
-                await transcriber.setLanguage(language)
+                await transcriber.setLanguages(languageSelection)
                 Trace.log("model hazır")
                 state = .idle
             } catch {
@@ -432,33 +432,87 @@ final class DictationController {
 
     // MARK: - Dikte dili
 
+    /// Menüde sunulan diller. Whisper zaten çok dilli olduğu için ek dil
+    /// eklemek model boyutunu ARTIRMIYOR — sadece decode anındaki dil
+    /// token'ı değişiyor.
+    enum LanguageChoice: String, CaseIterable {
+        case tr, en, de, fr, es, it, ru, ar
+
+        var title: String {
+            switch self {
+            case .tr: "Türkçe"
+            case .en: "İngilizce"
+            case .de: "Almanca"
+            case .fr: "Fransızca"
+            case .es: "İspanyolca"
+            case .it: "İtalyanca"
+            case .ru: "Rusça"
+            case .ar: "Arapça"
+            }
+        }
+    }
+
     private static let languageKey = "dictationLanguage"
 
-    /// `nil` = otomatik algıla. Varsayılan "tr": ölçümde dili sabitlemek
-    /// otomatik algılamadan belirgin şekilde iyi çıktı.
-    /// "auto" diske SENTINEL olarak yazılıyor — nil'i saklayamayız, yoksa
-    /// otomatik seçimi her açılışta "tr" olarak geri okurduk.
-    private(set) var language: String? = {
+    /// Eski format tek bir string'di: "tr", "en" veya "auto" (nil'in disk
+    /// SENTINEL'i). Yeni format aynı anahtarı kullanıyor ama virgülle
+    /// ayrılmış birden çok kodu da kabul ediyor ("tr,en") — eski değerler
+    /// (tek kod / "auto") YENİ ŞEMADA DA geçerli, geriye dönük göç gerekmedi.
+    private(set) var languageSelection: Transcriber.LanguageSelection = {
         let raw = UserDefaults.standard.string(forKey: DictationController.languageKey) ?? "tr"
-        return raw == "auto" ? nil : raw
+        return DictationController.parseLanguage(raw)
     }()
 
-    var languageLabel: String { language?.uppercased() ?? "AUTO" }
+    private static func parseLanguage(_ raw: String) -> Transcriber.LanguageSelection {
+        guard raw != "auto" else { return .auto }
+        let codes = raw.split(separator: ",").map(String.init).filter { !$0.isEmpty }
+        return .fixed(codes.isEmpty ? ["tr"] : codes)
+    }
 
-    /// Karttaki küre düğmesi: tr → en → otomatik → tr.
-    @discardableResult
-    func cycleLanguage() -> String {
-        let next: String?
-        switch language {
-        case "tr": next = "en"
-        case "en": next = nil
-        default:   next = "tr"
+    private static func serializeLanguage(_ selection: Transcriber.LanguageSelection) -> String {
+        switch selection {
+        case .auto: "auto"
+        case .fixed(let codes): codes.joined(separator: ",")
         }
-        language = next
-        UserDefaults.standard.set(next ?? "auto", forKey: Self.languageKey)
-        Task { await transcriber.setLanguage(next) }
+    }
+
+    var languageLabel: String {
+        switch languageSelection {
+        case .auto: "OTO"
+        case .fixed(let codes): codes.map { $0.uppercased() }.joined(separator: "+")
+        }
+    }
+
+    var isAutoLanguage: Bool { languageSelection == .auto }
+
+    func isLanguageSelected(_ code: LanguageChoice) -> Bool {
+        guard case .fixed(let codes) = languageSelection else { return false }
+        return codes.contains(code.rawValue)
+    }
+
+    private func applyLanguage(_ selection: Transcriber.LanguageSelection) {
+        languageSelection = selection
+        UserDefaults.standard.set(Self.serializeLanguage(selection), forKey: Self.languageKey)
+        Task { await transcriber.setLanguages(selection) }
         Trace.log("dikte dili → \(languageLabel)")
-        return languageLabel
+    }
+
+    func setAutoLanguage() { applyLanguage(.auto) }
+
+    /// Bir dili işaretle/kaldır. Otomatik moddaysa önce oradan çıkarıp tek
+    /// dille başlar. Son kalan dil kaldırılamaz — boş seçim anlamsız.
+    func toggleLanguage(_ code: LanguageChoice) {
+        guard case .fixed(var codes) = languageSelection else {
+            applyLanguage(.fixed([code.rawValue]))
+            return
+        }
+        if let index = codes.firstIndex(of: code.rawValue) {
+            guard codes.count > 1 else { return }
+            codes.remove(at: index)
+        } else {
+            codes.append(code.rawValue)
+        }
+        applyLanguage(.fixed(codes))
     }
 
     func cancel() {

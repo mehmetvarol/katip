@@ -10,8 +10,20 @@ actor Transcriber {
     private var pipe: WhisperKit?
     private var promptTokens: [Int]?
     private var useGlossary = true
-    /// Ölçüm için geçici dil değiştirme.
-    var languageOverride: String?
+
+    /// Dikte dili — tek dil, birden fazla dil (her biri denenip en güvenilir
+    /// sonuç seçilir) veya gerçek otomatik algılama.
+    ///
+    /// ÖNEMLİ GEÇMİŞ: `.auto` durumu önceden VARDI ama BOZUKTU — eski kod
+    /// `languageOverride` nil olduğunda bile `language: "tr"` gönderiyor,
+    /// `detectLanguage` hep `false` kalıyordu. Yani "Otomatik" seçmek hiçbir
+    /// şeyi değiştirmiyordu, sessizce "tr"ye eşdeğerdi. Bu, çoklu dil desteği
+    /// eklenirken fark edildi ve düzeltildi.
+    enum LanguageSelection: Equatable {
+        case auto
+        case fixed([String])   // en az 1 eleman; birden fazlaysa hepsi denenir
+    }
+    var languageSelection: LanguageSelection = .fixed(["tr"])
 
     var isReady: Bool { pipe != nil }
 
@@ -108,25 +120,65 @@ actor Transcriber {
         Trace.log("ısınma \(String(format: "%.1f", Date().timeIntervalSince(started))) sn")
     }
 
-    func setLanguage(_ lang: String?) { languageOverride = lang }
+    func setLanguages(_ selection: LanguageSelection) { languageSelection = selection }
 
     /// - Parameter context: Aynı diktenin ÖNCEKİ parçasından çıkan metin.
     ///   Whisper'ın `condition_on_previous_text`'i — decoder'a "bu cümle
     ///   devam ediyor" bilgisini veren tek mekanizma.
     func transcribe(_ samples: [Float], context: String? = nil) async throws -> String {
-        guard let pipe else { throw TranscriberError.notLoaded }
+        guard isReady else { throw TranscriberError.notLoaded }
         // Tokenizer yükleme anında hazır olmayabiliyor; ilk katipde tekrar dene.
         // Sessizce atlanırsa terminoloji yönlendirmesi hiç çalışmaz.
         if promptTokens == nil, useGlossary { buildPromptTokens() }
 
+        switch languageSelection {
+        case .auto:
+            return try await transcribeOnce(samples, language: nil, context: context).text
+
+        case .fixed(let languages) where languages.count <= 1:
+            return try await transcribeOnce(samples, language: languages.first ?? "tr", context: context).text
+
+        case .fixed(let languages):
+            // Birden fazla dil işaretliyse HER BİRİ için ayrı tam geçiş yapılıp
+            // en güvenilir sonuç seçiliyor. Whisper'ın tek geçişte "bu dillerden
+            // biri" diye çalışan bir modu yok — bu, o eksikliği taklit eden tek
+            // yol. Bedeli açık: N dil = N kat süre. Kullanıcı bunu bilerek seçti.
+            Trace.log("çoklu dil denemesi: \(languages.joined(separator: ", "))")
+            var best: (text: String, score: Float)?
+            for language in languages {
+                let candidate = try await transcribeOnce(samples, language: language, context: context)
+                Trace.log("  \(language) → skor \(String(format: "%.2f", candidate.score)) → \"\(candidate.text.prefix(50))\"")
+                // Boş metin asla dolu metni yenmez — skor ne olursa olsun.
+                // Yanlış dilde zorlanan ses çoğu zaman boş/neredeyse-boş bir
+                // segment üretiyor ve WhisperKit buna 0.0 gibi yüksek bir
+                // ortalama log-olasılık veriyor; ölçümde yakalandı — "en" boş
+                // çıktı verirken skor 0.00, gerçek "tr" metni -0.13 çıktı ve
+                // sayı olarak DAHA YÜKSEK olduğu için boş sonuç kazanıyordu.
+                let better: Bool
+                if candidate.text.isEmpty { better = false }
+                else if best == nil || best!.text.isEmpty { better = true }
+                else { better = candidate.score > best!.score }
+                if better { best = candidate }
+            }
+            return best?.text ?? ""
+        }
+    }
+
+    /// Tek bir dil için tam bir çeviri geçişi. Skor, o geçişin ne kadar
+    /// GÜVENİLİR olduğunu söylüyor — çoklu dil modunda aday sonuçlar bu
+    /// skora göre karşılaştırılıyor.
+    private func transcribeOnce(_ samples: [Float], language: String?, context: String?) async throws -> (text: String, score: Float) {
+        guard let pipe else { throw TranscriberError.notLoaded }
+
         let options = DecodingOptions(
             task: .transcribe,
-            // Dil SABİT. Otomatik algılama bu projede düşman: İngilizce terimle
-            // başlayan bir Türkçe cümlede pencereyi `en` sanıp ekleri bozuyor.
-            language: languageOverride ?? "tr",
+            language: language,
             temperature: 0,
             usePrefillPrompt: true,
-            detectLanguage: false,
+            // `language: nil` demek gerçekten algıla demek. ESKİDEN bu alan
+            // hep `false`'du — "Otomatik" seçmek hiçbir şeyi değiştirmiyordu,
+            // bkz. LanguageSelection üstündeki not.
+            detectLanguage: language == nil,
             skipSpecialTokens: true,
             withoutTimestamps: true,
             promptTokens: Self.fitsSingleWindow(samples) ? prompt(for: context) : nil,
@@ -146,9 +198,17 @@ actor Transcriber {
         // arıza anında ödeniyor.
         if context != nil, Repetition.isRepetitive(text) {
             Trace.log("bağlamlı çeviri tekrara düştü — bağlamsız yeniden deneniyor")
-            return try await transcribe(samples, context: nil)
+            return try await transcribeOnce(samples, language: language, context: nil)
         }
-        return Self.clean(text, useGlossary: useGlossary)
+        return (Self.clean(text, useGlossary: useGlossary), Self.averageLogProb(results))
+    }
+
+    /// Segmentlerin ortalama log-olasılığı — WhisperKit'in kendi güven ölçütü.
+    /// Boş çıktı asla en iyi aday seçilmesin diye -sonsuz.
+    private static func averageLogProb(_ results: [TranscriptionResult]) -> Float {
+        let segments = results.flatMap(\.segments)
+        guard !segments.isEmpty else { return -Float.infinity }
+        return segments.map(\.avgLogprob).reduce(0, +) / Float(segments.count)
     }
 
     /// Ses tek bir Whisper penceresine (30 sn) sığıyor mu?
