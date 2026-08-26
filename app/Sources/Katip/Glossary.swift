@@ -164,6 +164,13 @@ enum Replacements {
     tan stack query = TanStack Query
 
     # --- eşik ölçümü kayıtlarından (2026-08-21) ---
+    # Uzun kural kısasından ÖNCE gelmeli, yoksa kısa olan önce eşleşir.
+    http only cokey = httpOnly cookie
+    localized storage = localStorage
+    sted = state
+    zostan = Zustand
+    persis = persist
+    cokey = cookie
     dipliya = deploy
     diploy = deploy
     direnleş = derinleş
