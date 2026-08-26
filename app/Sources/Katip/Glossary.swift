@@ -163,6 +163,10 @@ enum Replacements {
     ten stack query = TanStack Query
     tan stack query = TanStack Query
 
+    # --- eşik ölçümü kayıtlarından (2026-08-21) ---
+    dipliya = deploy
+    diploy = deploy
+
     # --- diğer ---
     Hawk = hook
     refaktör = refactor
