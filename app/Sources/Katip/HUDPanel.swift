@@ -532,7 +532,7 @@ private final class CardView: NSView, NSViewToolTipOwner {
         didSet { hovered = nil; painter.needsDisplay = true }
     }
 
-    private var state: DictationController.State = .loadingModel
+    private var state: DictationController.State = .loadingModel()
     private var levels: [CGFloat] = Array(repeating: 0.05, count: 16)
     private var phase: CGFloat = 0
     private var hovered: HUDPanel.Action?

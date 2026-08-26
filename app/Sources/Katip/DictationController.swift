@@ -7,7 +7,9 @@ import Foundation
 @MainActor
 final class DictationController {
     enum State: Equatable {
-        case loadingModel
+        /// `progress` yalnızca gerçek bir indirme sürerken dolu — model diskte
+        /// zaten varsa (her normal açılış) hep nil kalır, yüzde hiç görünmez.
+        case loadingModel(progress: Double? = nil)
         case idle
         case recording
         case locked        // sürekli dinleme — tuşu bırakabilirsin
@@ -26,7 +28,12 @@ final class DictationController {
 
         var label: String {
             switch self {
-            case .loadingModel: "Model yükleniyor…"
+            case .loadingModel(let progress):
+                // Model zaten diskteyse (her normal açılış) tek bir 100% callback'i
+                // geliyor — o an gerçekte hiçbir şey inmiyor, "indiriliyor" YANLIŞ olur.
+                (progress ?? 0) > 0 && (progress ?? 0) < 1
+                    ? "Model indiriliyor… %\(Int((progress ?? 0) * 100))"
+                    : "Model yükleniyor…"
             case .idle: "Hazır"
             case .recording: "Dinliyor — bitirmek için tıkla"
             case .locked: "🔒 Kilitli — sürekli dinliyor, bitirmek için tuşa bas"
@@ -36,7 +43,7 @@ final class DictationController {
         }
     }
 
-    private(set) var state: State = .loadingModel {
+    private(set) var state: State = .loadingModel() {
         didSet { if oldValue != state { onChange?(state) } }
     }
 
@@ -63,6 +70,11 @@ final class DictationController {
     private let recorder = AudioRecorder()
     private let transcriber = Transcriber()
 
+    /// Yüzde güncellemelerini seyrekleştirir — indirme callback'i saniyede
+    /// onlarca kez tetikleniyor, her seferinde `state` değiştirip tüm UI'ı
+    /// (ikon + tooltip + HUD) yeniden çizdirmek gereksiz iş.
+    private var lastReportedDownloadPercent = -1
+
     func prepare() {
         FocusTracker.shared.start()
         Trace.log("prepare() — erişilebilirlik izni: \(Permissions.hasAccessibility)")
@@ -72,7 +84,9 @@ final class DictationController {
         Task {
             do {
                 Trace.log("model yükleniyor…")
-                try await transcriber.load()
+                try await transcriber.load(onDownloadProgress: { [weak self] fraction in
+                    Task { @MainActor in self?.reportDownloadProgress(fraction) }
+                })
                 await transcriber.setLanguages(languageSelection)
                 Trace.log("model hazır")
                 state = .idle
@@ -94,6 +108,14 @@ final class DictationController {
         if !Permissions.hasAccessibility {
             DispatchQueue.main.async { [weak self] in self?.onNeedsAccessibility?() }
         }
+    }
+
+    private func reportDownloadProgress(_ fraction: Double) {
+        let percent = Int((fraction * 100).rounded())
+        guard percent != lastReportedDownloadPercent else { return }
+        lastReportedDownloadPercent = percent
+        guard case .loadingModel = state else { return }
+        state = .loadingModel(progress: fraction)
     }
 
     func toggle() {

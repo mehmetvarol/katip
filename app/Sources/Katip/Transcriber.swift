@@ -74,7 +74,13 @@ actor Transcriber {
     static let glossaryTokenBudget = 40
 
     /// Ölçüm için model/sözlük değiştirilebilir; uygulama varsayılanları kullanır.
-    func load(model: String? = nil, useGlossary: Bool? = nil) async throws {
+    ///
+    /// `onDownloadProgress`: yalnızca model diskte YOKSA (ilk çalıştırma) çağrılır —
+    /// `WhisperKit.download`'ı kendimiz önden çağırıp `modelFolder` yolunu config'e
+    /// vermek, aşağıdaki `WhisperKit(config)`'in aynı modeli bir daha indirmesini
+    /// engelliyor (`setupModels`: `modelFolder` verilmişse `download` hiç tetiklenmiyor).
+    func load(model: String? = nil, useGlossary: Bool? = nil,
+              onDownloadProgress: (@Sendable (Double) -> Void)? = nil) async throws {
         guard pipe == nil else { return }
         self.useGlossary = useGlossary ?? Self.glossaryEnabled
         // downloadBase şart: varsayılan ~/Documents/huggingface, yani 1.5 GB'lık
@@ -93,9 +99,17 @@ actor Transcriber {
             audioEncoderCompute: useANE ? .cpuAndNeuralEngine : .cpuAndGPU,
             textDecoderCompute: useANE ? .cpuAndNeuralEngine : .cpuAndGPU)
 
-        let config = WhisperKitConfig(
-            model: model ?? Self.defaultModel,
+        let variant = model ?? Self.defaultModel
+        let modelFolder = try await WhisperKit.download(
+            variant: variant,
             downloadBase: Support.directory,
+            progressCallback: { progress in
+                onDownloadProgress?(progress.fractionCompleted)
+            })
+
+        let config = WhisperKitConfig(
+            model: variant,
+            modelFolder: modelFolder.path,
             computeOptions: compute,
             // WhisperKit'in kendi prewarm'ı ölçüldü: ilk çeviriyi hızlandırmıyor
             // (yine 4.9 sn) ama yükleme süresine ~2 sn ekliyor. Kapalı.

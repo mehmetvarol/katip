@@ -130,4 +130,7 @@ Ayarlar düz metin dosyaları olarak `~/Library/Application Support/Katip/` alt�
 
 ---
 
+`p0-bench/` ve `kiyas/` çalışan uygulamanın parçası değil — motor seçimi ve
+rakip kıyası için kullanılan tek seferlik ölçüm araçları.
+
 Geliştirme kararları, ölçümler ve motor seçimi için proje geçmişine bakılabilir.
