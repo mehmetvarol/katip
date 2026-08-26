@@ -125,6 +125,7 @@ final class DictationController {
             sessionAudio = []
             spokenSeconds = 0
             state = .recording
+            applyAppProfile()
             startStreaming()
         } catch {
             state = .error("Kayıt başlatılamadı: \(error.localizedDescription)")
@@ -419,6 +420,31 @@ final class DictationController {
 
     /// Karttaki kilit düğmesi. Kayıt yoksa başlatıp doğrudan kilide geçer —
     /// çift-basışla aynı sonuca fareyle de ulaşılsın.
+    // MARK: - Uygulama-bazlı kurallar
+
+    /// Her `begin()`'de ÇAĞRILIYOR — profil bulunsa da bulunmasa da, önceki
+    /// oturumdan kalan bir geçersiz kılma bir sonrakine SIZMASIN diye. Yani
+    /// "temizle" diye ayrı bir adım yok: her oturum kendi doğru değerini
+    /// baştan kuruyor.
+    ///
+    /// Menüdeki (kalıcı) `languageSelection`'a HİÇ DOKUNMUYOR — kullanıcının
+    /// kendi seçimi bu. Yalnızca Transcriber'ın O OTURUM için kullanacağı
+    /// canlı değeri değiştiriyor; oturum bitince bir sonraki `begin()` zaten
+    /// kendi doğrusunu (profil ya da kullanıcının menü seçimi) yeniden kurar.
+    private func applyAppProfile() {
+        let appName = FocusTracker.shared.previousApp?.localizedName
+        let profile = AppProfiles.profile(for: appName)
+
+        let effectiveLanguage = profile.language ?? languageSelection
+        Task { await transcriber.setLanguages(effectiveLanguage) }
+
+        Task { await transcriber.setGlossaryOverride(profile.glossary) }
+
+        if profile.language != nil || profile.glossary != nil {
+            Trace.log("uygulama kuralı (\(appName ?? "?")) — dil: \(effectiveLanguage.serialized), sözlük: \(profile.glossary.map { $0 ? "açık" : "kapalı" } ?? "genel ayar")")
+        }
+    }
+
     // MARK: - Dikte dili
 
     /// Menüde sunulan diller. Whisper zaten çok dilli olduğu için ek dil

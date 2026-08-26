@@ -22,6 +22,23 @@ actor Transcriber {
     enum LanguageSelection: Equatable {
         case auto
         case fixed([String])   // en az 1 eleman; birden fazlaysa hepsi denenir
+
+        /// Diske/dosyaya yazılan TEK biçim: "auto" veya "tr,en" gibi virgüllü
+        /// kodlar. `DictationController`'ın kalıcı ayarı VE `AppProfiles`
+        /// kural dosyası AYNI biçimi okuyor — ikisi ayrı ayrı parse etseydi
+        /// biri güncellenip diğeri unutulduğunda sessizce sapardı.
+        static func parse(_ raw: String) -> LanguageSelection {
+            guard raw != "auto" else { return .auto }
+            let codes = raw.split(separator: ",").map(String.init).filter { !$0.isEmpty }
+            return .fixed(codes.isEmpty ? ["tr"] : codes)
+        }
+
+        var serialized: String {
+            switch self {
+            case .auto: "auto"
+            case .fixed(let codes): codes.joined(separator: ",")
+            }
+        }
     }
     var languageSelection: LanguageSelection = .fixed(["tr"])
 
@@ -122,14 +139,30 @@ actor Transcriber {
 
     func setLanguages(_ selection: LanguageSelection) { languageSelection = selection }
 
+    /// Uygulama-bazlı kural bu oturum için sözlüğü açık/kapalı zorluyorsa
+    /// dolu, aksi hâlde `nil` — o zaman genel ayar (`useGlossary`) geçerli.
+    ///
+    /// AYRI bir ivar olmasının sebebi: `useGlossary`, `Transcriber.glossaryEnabled`
+    /// genel ayarını yansıtıyor ve yalnızca `load()`'da bir kez okunuyor. Bunu
+    /// her oturumda YAZSAYDIK, uygulama kuralı olmayan bir sonraki oturum genel
+    /// ayarı değil son yazılan değeri görürdü — sessizce kalıcı bir yan etki.
+    var sessionGlossaryOverride: Bool?
+
+    private var effectiveGlossary: Bool { sessionGlossaryOverride ?? useGlossary }
+
+    func setGlossaryOverride(_ on: Bool?) { sessionGlossaryOverride = on }
+
     /// - Parameter context: Aynı diktenin ÖNCEKİ parçasından çıkan metin.
     ///   Whisper'ın `condition_on_previous_text`'i — decoder'a "bu cümle
     ///   devam ediyor" bilgisini veren tek mekanizma.
     func transcribe(_ samples: [Float], context: String? = nil) async throws -> String {
         guard isReady else { throw TranscriberError.notLoaded }
         // Tokenizer yükleme anında hazır olmayabiliyor; ilk katipde tekrar dene.
-        // Sessizce atlanırsa terminoloji yönlendirmesi hiç çalışmaz.
-        if promptTokens == nil, useGlossary { buildPromptTokens() }
+        // Sessizce atlanırsa terminoloji yönlendirmesi hiç çalışmaz. `effectiveGlossary`
+        // kontrolü ÖNEMLİ: genel ayar kapalıyken bir uygulama kuralı sözlüğü
+        // AÇIYORSA, terim token'ları o zamana kadar hiç oluşturulmamış olabilir —
+        // burada tembel inşa ediliyor.
+        if promptTokens == nil, effectiveGlossary { buildPromptTokens() }
 
         switch languageSelection {
         case .auto:
@@ -181,7 +214,7 @@ actor Transcriber {
             detectLanguage: language == nil,
             skipSpecialTokens: true,
             withoutTimestamps: true,
-            promptTokens: Self.fitsSingleWindow(samples) ? prompt(for: context) : nil,
+            promptTokens: Self.fitsSingleWindow(samples) ? prompt(for: context, includeGlossary: effectiveGlossary) : nil,
             // Sessizlikte uydurma metin üretimine karşı (Türkçe'de "Altyazı M.K." tipi).
             noSpeechThreshold: 0.6
         )
@@ -200,7 +233,7 @@ actor Transcriber {
             Trace.log("bağlamlı çeviri tekrara düştü — bağlamsız yeniden deneniyor")
             return try await transcribeOnce(samples, language: language, context: nil)
         }
-        return (Self.clean(text, useGlossary: useGlossary), Self.averageLogProb(results))
+        return (Self.clean(text, useGlossary: effectiveGlossary), Self.averageLogProb(results))
     }
 
     /// Segmentlerin ortalama log-olasılığı — WhisperKit'in kendi güven ölçütü.
@@ -241,16 +274,21 @@ actor Transcriber {
     /// `promptTokens`'ı SONDAN tutuyor, yani en değerli olan sona konmalı.
     /// Önceki metin sözlükten daha değerli: cümlenin ortasında olduğumuzu
     /// yalnızca o söyleyebiliyor.
-    private func prompt(for context: String?) -> [Int]? {
+    /// `includeGlossary` bu ÇAĞRIYA özel — uygulama kuralı sözlüğü kapatıyorsa
+    /// terim token'ları hiç eklenmez. Bağlam yönlendirmesi bundan BAĞIMSIZ:
+    /// sözlük kapalı olsa bile önceki cümlenin bağlamı hep veriliyor, ikisi
+    /// ayrı fayda sağlıyor (bkz. Transcriber dosya başı notu).
+    private func prompt(for context: String?, includeGlossary: Bool) -> [Int]? {
+        let base = includeGlossary ? (promptTokens ?? []) : []
         guard let context, !context.isEmpty, let tokenizer = pipe?.tokenizer else {
-            return promptTokens
+            return base.isEmpty ? nil : base
         }
         // Bağlamı kısa tut. Her prompt token'ı decoder prefill'ine ekleniyor ve
         // ölçüldü ki 109 token ~2.3 sn'ye mal oluyor (bkz. `glossaryEnabled`).
         // Cümlenin devam ettiğini anlatmak için son bir cümlelik kuyruk yeter.
         let tail = String(context.suffix(Self.contextCharacterBudget))
         let contextTokens = tokenizer.encode(text: " " + tail).suffix(Self.contextTokenBudget)
-        return (promptTokens ?? []) + Array(contextTokens)
+        return base + Array(contextTokens)
     }
 
     /// Ölçümle seçildi, tahminle değil — bkz. `--selftest --context`.
@@ -263,7 +301,10 @@ actor Transcriber {
     /// SONDAN tutuyor, yani kritik terimler listenin SONUNDA olmalı.
     /// (faster-whisper `hotwords` bunun tersi — oradan taşırken listeyi çevir.)
     private func buildPromptTokens() {
-        guard useGlossary else { return }
+        // Çağıran taraf (`transcribe`) zaten `effectiveGlossary`'ye göre
+        // gate ediyor — burada AYRICA `useGlossary`'ye bakmak, genel ayar
+        // kapalıyken bir uygulama kuralının sözlüğü açmasını SESSİZCE
+        // engellerdi.
         guard let tokenizer = pipe?.tokenizer else {
             Trace.log("tokenizer hazır değil — sözlük yönlendirmesi atlandı")
             return

@@ -150,6 +150,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             exit(ok ? 0 : 1)
         }
 
+        // Uygulama kuralları: eşleşme mantığı VE gerçek etkisi (sözlük
+        // gerçekten kapanıyor mu) ölçülüyor.
+        if CommandLine.arguments.contains("--appprofiletest") {
+            print("═══ eşleşme ═══")
+            let cases: [(String?, String, Bool)] = [
+                ("Cursor", "tr,en", true),
+                ("Visual Studio Code", "tr,en", true),
+                ("Terminal", "tr,en", true),
+                ("Mail", "tr", false),
+                ("Slack", "tr", false),
+                ("Notes", "tr", false),
+                ("Safari", "?", false),   // hiçbir kuralla eşleşmemeli
+                (nil, "?", false),
+            ]
+            var failed = 0
+            for (name, expectedLang, expectedGlossary) in cases {
+                let p = AppProfiles.profile(for: name)
+                if name == "Safari" || name == nil {
+                    let ok = p.language == nil && p.glossary == nil
+                    print("\(ok ? "✔" : "✗") \(name ?? "nil") → kural yok bekleniyordu, bulunan: \(String(describing: p.language)), \(String(describing: p.glossary))")
+                    if !ok { failed += 1 }
+                } else {
+                    let ok = p.language?.serialized == expectedLang && p.glossary == expectedGlossary
+                    print("\(ok ? "✔" : "✗") \(name!) → \(p.language?.serialized ?? "nil"), sözlük=\(String(describing: p.glossary))  (beklenen \(expectedLang), \(expectedGlossary))")
+                    if !ok { failed += 1 }
+                }
+            }
+
+            print("\n═══ gerçek etki: sözlük override çeviriyi değiştiriyor mu ═══")
+            let recordingArg = CommandLine.arguments.firstIndex(of: "--appprofiletest").flatMap {
+                CommandLine.arguments.dropFirst($0 + 1).first
+            }
+            guard let path = recordingArg, let samples = try? Self.readAudio(at: path) else {
+                print("(kayıt verilmedi — sadece eşleşme sınandı: Katip --appprofiletest <kayıt.wav>)")
+                exit(failed == 0 ? 0 : 1)
+            }
+            Task {
+                let transcriber = Transcriber()
+                try? await transcriber.load()
+
+                await transcriber.setGlossaryOverride(false)
+                let off = (try? await transcriber.transcribe(samples)) ?? "(hata)"
+                print("sözlük KAPALI (uygulama kuralı gibi) → \"\(off)\"")
+
+                await transcriber.setGlossaryOverride(true)
+                let on = (try? await transcriber.transcribe(samples)) ?? "(hata)"
+                print("sözlük AÇIK  (uygulama kuralı gibi) → \"\(on)\"")
+
+                let changed = off != on
+                print(changed ? "\n✔ override gerçekten etkiliyor (iki çıktı farklı)"
+                              : "\n(iki çıktı aynı — bu kayıtta sözlük zaten devreye girmiyor olabilir)")
+                exit(failed == 0 ? 0 : 1)
+            }
+            return
+        }
+
         // Dalga GERÇEK bir kayıtla nasıl davranıyor? Seviyeleri kayıttan
         // çıkarıp animasyonun kendi kodundan geçiriyoruz — render'daki tek tek
         // seviyeler değil, zaman içindeki gerçek davranış.
@@ -599,6 +655,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         replacements.target = self
         menu.addItem(replacements)
 
+        let appProfiles = NSMenuItem(title: "Uygulama kurallarını düzenle…",
+                                     action: #selector(openAppProfiles), keyEquivalent: "")
+        appProfiles.target = self
+        menu.addItem(appProfiles)
+
         let snippets = NSMenuItem(title: "Metin kısayollarını düzenle…",
                                   action: #selector(openSnippets), keyEquivalent: "")
         snippets.target = self
@@ -791,6 +852,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openReplacements() {
         _ = Replacements.load()
         NSWorkspace.shared.open(Replacements.fileURL)
+    }
+
+    @objc private func openAppProfiles() {
+        AppProfiles.ensureFileExists()
+        NSWorkspace.shared.open(AppProfiles.fileURL)
     }
 
     /// Menüden tetiklenince kendi binary'sini `--learn` ile çalıştırıp sonucu
