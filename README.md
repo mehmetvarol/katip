@@ -84,7 +84,7 @@ tail -f ~/Library/Application\ Support/Katip/katip.log
 ## Yüzen kart
 
 Masaüstünde duran, şekil değiştiren bir gösterge — boşta ince bir çizgi,
-fareyle üstüne gelince üç düğüme açılır (dil, mikrofon, kilit), konuşurken
+fareyle üstüne gelince iki düğmeye açılır (dil, mikrofon), konuşurken
 ses seviyesine tepki veren bir dalgayla genişler. Sürükleyip savurabilirsin —
 fizik tabanlı hareket kenara yapışır, ekran dışına asla tamamen çıkmaz.
 
@@ -96,6 +96,12 @@ fizik tabanlı hareket kenara yapışır, ekran dışına asla tamamen çıkmaz.
   gidiyor, yani modele bütün bağlam birden veriliyor
 - **Sözlük** — sık bozulan teknik terimler için Whisper'a ipucu (varsayılan
   açık, 10 terim); kendi terimlerini `glossary.txt`'e ekleyebilirsin
+- **Çoklu dil seçimi** — kartın küre ikonu birden fazla dili aynı anda
+  işaretlemene izin verir; Katip her dili ayrı ayrı dener ve en güvenilir
+  sonucu seçer
+- **Uygulama-bazlı kurallar** — dikte dili ve sözlük, odaktaki uygulamaya göre
+  otomatik değişir (ör. Cursor'da TR+EN sözlük açık, Slack'te sadece TR
+  sözlük kapalı); `app-profiles.txt`'te düzenlenir
 - **Metin kısayolları** — söylediğin bir ifade hazır bir metin bloğuna genişler
 - **Projelerinden terim öğrenme** — `package.json` bağımlılıklarını tarayıp
   telaffuz kurallarını önerir (`Katip --learn ~/Desktop`)
@@ -108,6 +114,7 @@ Ayarlar düz metin dosyaları olarak `~/Library/Application Support/Katip/` alt�
 | `glossary.txt` | Whisper'a terim ipucu (bütçe 40 token, kritik terimleri sona yaz) |
 | `replacements.txt` | `yanlış = doğru` düzeltme kuralları |
 | `snippets.txt` | `tetikleyici = uzun metin` kısayolları |
+| `app-profiles.txt` | Uygulama adına göre dikte dili + sözlük kuralı |
 | `history.jsonl` | Dikte geçmişi (düz metin, 30 gün) |
 | `recordings/` | Son 20 diktenin **ham sesi** — "Yeniden çevir" bunu kullanıyor |
 | `katip.log` | Çalışma zamanı günlüğü |
