@@ -166,6 +166,8 @@ enum Replacements {
     # --- eşik ölçümü kayıtlarından (2026-08-21) ---
     dipliya = deploy
     diploy = deploy
+    direnleş = derinleş
+    direnlemesine = derinlemesine
 
     # --- diğer ---
     Hawk = hook
