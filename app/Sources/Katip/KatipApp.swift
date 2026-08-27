@@ -20,8 +20,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let controller = DictationController()
     private let hotkey = HotkeyMonitor()
     private var animationTimer: Timer?
-    private var spinner: NSProgressIndicator?
-    private var smoothedLevel: Float = 0
     private var hud: HUDPanel?
     private var wasShown = false
 
@@ -1389,19 +1387,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch state {
         case .recording, .locked:
-            stopSpinner()
             startAnimation()
-            // Kayıtta kırmızı: bakmadan da "açık" olduğu anlaşılsın.
-            button.contentTintColor = state == .locked ? .systemOrange : .systemRed
+            // Kullanıcı akan dalga çubuklarını "ne olduğu belli olmuyor"
+            // diye eleştirdi — normal mikrofon ikonunun DOLU hâli
+            // (`mic.fill`, zaten `state.symbol`'de tanımlı) evrensel ve
+            // net: "şu an ses alıyor". Renk kırmızı/turuncu ile ayrıca
+            // vurgulanıyor.
+            let tint: NSColor = state == .locked ? .systemOrange : .systemRed
+            button.image = NSImage(systemSymbolName: state.symbol, accessibilityDescription: "Dinliyor")?
+                .withSymbolConfiguration(.init(paletteColors: [tint]))
+            button.image?.isTemplate = false
         case .transcribing:
+            // Native NSProgressIndicator menü çubuğu ikon alanına doğru
+            // sığmıyordu ("oraya bir sığmıyor sanki") — kaldırıldı. Yüzen
+            // kart zaten dönen bir gösterge + "Yazıya çevriliyor…" metni
+            // gösteriyor, menü çubuğunda sabit bir simge yeterli.
             stopAnimation()
-            startSpinner()
             button.contentTintColor = nil
+            button.image = icon(for: state)
+            button.image?.isTemplate = true
         default:
             // Kart açıkken animasyon döngüsü sürsün: dalgalar yumuşakça sönümlensin
             // ve durum metni canlı kalsın.
             if hud == nil { stopAnimation() }
-            stopSpinner()
             button.contentTintColor = nil
             button.image = icon(for: state)
             button.image?.isTemplate = true
@@ -1427,9 +1435,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopAnimation() {
         animationTimer?.invalidate()
         animationTimer = nil
-        smoothedLevel = 0
     }
 
+    /// Menü çubuğu ikonu artık sabit (mikrofon dolu/waveform) — burada sadece
+    /// yüzen kartın dalga animasyonunu beslemek için tikleniyor.
     private func tick() {
         hud?.update(state: controller.state, level: controller.inputLevel)
 
@@ -1438,49 +1447,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch controller.state {
         case .recording, .locked, .transcribing: break
         default:
-            if hud?.isSettled ?? true { stopAnimation(); return }
+            if hud?.isSettled ?? true { stopAnimation() }
         }
-
-        guard let button = statusItem.button else { return }
-        // Ham seviye çok zıplıyor; yumuşat ve konuşma aralığına göre yükselt.
-        let raw = min(1, controller.inputLevel * 6)
-        smoothedLevel += (raw - smoothedLevel) * 0.4
-        let value = Double(max(0.05, smoothedLevel))
-
-        // `contentTintColor` + `isTemplate` ile kırmızıya boyamayı denedik —
-        // değişken-değerli ("variableValue") SF Symbol'lerde tonlama
-        // uygulanmıyor (gerçek kullanımda doğrulandı: ikon hep siyah/gri
-        // kaldı). Rengi doğrudan sembol yapılandırmasına gömmek güvenilir
-        // olan yol; template/tint'e bağımlı değil.
-        let tint: NSColor = controller.state == .locked ? .systemOrange : .systemRed
-        let config = NSImage.SymbolConfiguration(paletteColors: [tint])
-        button.image = NSImage(systemSymbolName: "waveform",
-                               variableValue: value,
-                               accessibilityDescription: "Dinliyor")?
-            .withSymbolConfiguration(config)
-        button.image?.isTemplate = false
     }
-
-    /// Çeviri sırasında native yükleniyor topacı.
-    private func startSpinner() {
-        guard spinner == nil, let button = statusItem.button else { return }
-        button.image = nil
-
-        let indicator = NSProgressIndicator(frame: NSRect(x: 4, y: 4, width: 14, height: 14))
-        indicator.style = .spinning
-        indicator.controlSize = .small
-        indicator.isIndeterminate = true
-        indicator.startAnimation(nil)
-        button.addSubview(indicator)
-        spinner = indicator
-    }
-
-    private func stopSpinner() {
-        spinner?.stopAnimation(nil)
-        spinner?.removeFromSuperview()
-        spinner = nil
-    }
-
 
     private func icon(for state: DictationController.State) -> NSImage? {
         let image = NSImage(systemSymbolName: state.symbol, accessibilityDescription: "Katip")
