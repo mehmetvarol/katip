@@ -686,6 +686,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         listen.target = self
         menu.addItem(listen)
 
+        // İzin verildikten sonra süreç yeniden başlamadan geçerli olmayabilir
+        // (Erişilebilirlik durumu süreç başına önbelleklenir). Kullanıcı
+        // Terminal'e "tccutil reset" yazmayı bilmiyor — tek tıkla çözüm.
+        let relaunch = NSMenuItem(title: "🔄 Katip'i yeniden başlat (izin verdikten sonra gerekir)",
+                                  action: #selector(relaunchApp), keyEquivalent: "")
+        relaunch.target = self
+        menu.addItem(relaunch)
+
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Çık", action: #selector(NSApplication.terminate(_:)),
                               keyEquivalent: "q")
@@ -884,6 +892,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func fixAccessibility() {
         Permissions.requestAccessibility()
         Permissions.openSettings(.accessibility)
+        flash("İzni verdikten sonra menüden \"Katip'i yeniden başlat\"ı seç")
+    }
+
+    /// Erişilebilirlik durumu SÜREÇ BAŞINA önbelleklenir — Ayarlar'da "açık"
+    /// görünse bile ÇALIŞAN sürece hiç yansımayabilir, sadece yeniden başlatma
+    /// bunu düzeltiyor. Bu, uzaktaki bir kullanıcıda "izin verdim ama hâlâ
+    /// çalışmıyor" şikâyetiyle gerçek dünyada doğrulandı (2026-08-26) — kullanıcı
+    /// Terminal'e "tccutil reset" yazmayı bilmiyor, ama menüden tek tıkla
+    /// yeniden başlatabilir.
+    @objc private func relaunchApp() {
+        Trace.log("kullanıcı yeniden başlatmayı seçti")
+        // `open <path>` HÂLÂ ÇALIŞAN bir uygulamayı yeni bir süreç olarak
+        // BAŞLATMAZ, sadece öne getirir — bu yüzden doğrudan `open` çağırıp
+        // hemen terminate etmek YENİDEN BAŞLATMAZ, sadece kapatır (ölçüldü:
+        // manuel simülasyonda ikinci pid hiç oluşmadı). Ayrı bir kabuk süreci
+        // önce Katip'in ölmesini bekleyip SONRA `open` çağırıyor.
+        let path = Bundle.main.bundlePath
+        let safePath = path.replacingOccurrences(of: "'", with: "'\\''")
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "sleep 0.7; open '\(safePath)'"]
+        try? task.run()
+        NSApp.terminate(nil)
     }
 
     /// Tıklamanın neden işe yaramadığını göster. Sessizlik en kötü cevap.
