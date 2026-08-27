@@ -4,7 +4,11 @@ import IOKit.hid
 
 /// Kısayol tuşu seçenekleri. Menüden değiştirilebilir, UserDefaults'ta saklanır.
 enum HotkeyChoice: String, CaseIterable {
-    case rightOption, rightCommand, rightControl, rightShift
+    // "Sağ Control" bilerek YOK: standart Apple klavyelerinde (MacBook,
+    // Magic Keyboard) fiziksel sağ Control tuşu yok — kVK_RightControl
+    // hiçbir gerçek tuş basışıyla gelmiyor, seçenek sessizce hiçbir şey
+    // yapmıyordu. Kullanıcı gerçek kullanımda fark etti.
+    case rightOption, rightCommand, rightShift
     case f13, f14, f15, f16, f17, f18, f19
     case disabled
 
@@ -12,7 +16,6 @@ enum HotkeyChoice: String, CaseIterable {
         switch self {
         case .rightOption:  "Sağ Option (⌥)"
         case .rightCommand: "Sağ Command (⌘)"
-        case .rightControl: "Sağ Control (⌃)"
         case .rightShift:   "Sağ Shift (⇧)"
         case .f13: "F13"
         case .f14: "F14"
@@ -30,7 +33,6 @@ enum HotkeyChoice: String, CaseIterable {
         switch self {
         case .rightOption:  "⌥"
         case .rightCommand: "⌘"
-        case .rightControl: "⌃"
         case .rightShift:   "⇧"
         case .disabled:     ""
         default:            title
@@ -40,7 +42,7 @@ enum HotkeyChoice: String, CaseIterable {
     /// Modifier tuşları `flagsChanged` ile, F-tuşları `keyDown/keyUp` ile gelir.
     var isModifier: Bool {
         switch self {
-        case .rightOption, .rightCommand, .rightControl, .rightShift: true
+        case .rightOption, .rightCommand, .rightShift: true
         default: false
         }
     }
@@ -50,7 +52,6 @@ enum HotkeyChoice: String, CaseIterable {
         switch self {
         case .rightOption:  CGKeyCode(kVK_RightOption)
         case .rightCommand: CGKeyCode(kVK_RightCommand)
-        case .rightControl: CGKeyCode(kVK_RightControl)
         case .rightShift:   CGKeyCode(kVK_RightShift)
         case .f13: CGKeyCode(kVK_F13)
         case .f14: CGKeyCode(kVK_F14)
@@ -68,7 +69,6 @@ enum HotkeyChoice: String, CaseIterable {
         switch self {
         case .rightOption:  .maskAlternate
         case .rightCommand: .maskCommand
-        case .rightControl: .maskControl
         case .rightShift:   .maskShift
         default: nil
         }
