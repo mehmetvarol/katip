@@ -348,7 +348,14 @@ final class HUDPanel: NSPanel {
 
         if s.x.isSettled && s.y.isSettled && s.w.isSettled && s.h.isSettled {
             springs = nil
-            link.isPaused = true
+            // KOŞULSUZ `true` hataydı: yay (resize/taşıma) bittiğinde ekran
+            // döngüsünü her zaman durduruyordu — kart hâlâ kare istese bile
+            // (ör. .transcribing'in dönen göstergesi). .listening'den farklı
+            // boyutta olan yeni .transcribing biçimi bunu ortaya çıkardı: kart
+            // .listening→.transcribing resize'ı biter bitmez döngü duruyor,
+            // gösterge "bir tur atıp" donuyordu. Aynı satırdaki doğru mantık
+            // (338. satır) burada da geçerli.
+            link.isPaused = !card.wantsFrames
             invalidateShadow()
             savePosition()
         }
