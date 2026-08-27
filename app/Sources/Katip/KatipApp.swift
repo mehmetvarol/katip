@@ -693,10 +693,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         accessibility.target = self
         menu.addItem(accessibility)
 
-        let listen = NSMenuItem(
-            title: Permissions.hasInputMonitoring ? "✔ Giriş İzleme izni var"
-                                                  : "⚠️ Giriş İzleme izni ver… (kısayol tuşu)",
-            action: #selector(fixInputMonitoring), keyEquivalent: "")
+        let listenTitle: String
+        if Permissions.hasInputMonitoring {
+            listenTitle = "✔ Giriş İzleme izni var"
+        } else if Permissions.isInputMonitoringDenied {
+            // "izin ver…" YAZMIYORUZ — tıklamak hiçbir sistem istemi açmaz,
+            // kullanıcı "tıkladım, hiçbir şey olmadı" deneyimi yaşardı.
+            listenTitle = "⛔️ Giriş İzleme REDDEDİLMİŞ — Ayarlar'dan elle aç"
+        } else {
+            listenTitle = "⚠️ Giriş İzleme izni ver… (kısayol tuşu)"
+        }
+        let listen = NSMenuItem(title: listenTitle, action: #selector(fixInputMonitoring), keyEquivalent: "")
         listen.target = self
         menu.addItem(listen)
 
@@ -900,6 +907,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func fixInputMonitoring() {
+        if Permissions.isInputMonitoringDenied {
+            // requestInputMonitoring() reddedilmiş durumda hiçbir şey yapmaz
+            // (sistem istemi bir daha çıkmaz) — direkt Ayarlar'a yönlendir.
+            Permissions.openSettings(.inputMonitoring)
+            flash("Reddedilmiş — listede Katip'i kapat/aç, sonra menüden yeniden başlat")
+            return
+        }
         promptForInputMonitoring()
     }
 

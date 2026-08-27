@@ -24,6 +24,16 @@ enum Permissions {
         _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
     }
 
+    /// REDDEDİLMİŞ ile "henüz sorulmadı" arasındaki fark kritik: reddedilmişse
+    /// sistem istem penceresi bir daha ASLA çıkmaz (Apple'ın kasıtlı tasarımı —
+    /// tekrar tekrar sormayı engelliyor), `requestInputMonitoring()` çağırmak
+    /// hiçbir şey yapmaz. Tek çıkış: Sistem Ayarları'ndan elle aç/kapat ya da
+    /// `tccutil reset`. Menü bu ayrımı göstermezse kullanıcı "izin ver…"e
+    /// tıklar, hiçbir şey olmaz, neden çalışmadığını hiç anlamaz.
+    static var isInputMonitoringDenied: Bool {
+        IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeDenied
+    }
+
     /// Ham değeri de göster: "denied" ile "unknown" ayrımı teşhis için kritik.
     /// denied ise sistem istem penceresi BİR DAHA çıkmaz, kaydı sıfırlamak gerekir.
     static var inputMonitoringDescription: String {
