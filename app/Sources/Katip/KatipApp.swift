@@ -25,6 +25,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hud: HUDPanel?
     private var wasShown = false
 
+    /// nil değilse: uygulama Uygulamalar klasöründe değil. Bu durumda
+    /// izinler (Erişilebilirlik/Mikrofon/Giriş İzleme) HER AÇILIŞTA
+    /// sıfırlanır — bkz. `checkInstallLocation()`.
+    private var installLocationWarning: String?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Öz-test: mikrofon/tıklama gerektirmeden ASR hattını doğrular.
         //   Katip.app/Contents/MacOS/Katip --selftest ses.wav
@@ -540,6 +545,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.hud?.present(result: text)
         }
         if HUDPanel.isEnabled { showHUD() }
+        checkInstallLocation()
 
         hotkey.onNeedsPermission = { [weak self] in self?.promptForInputMonitoring() }
         hotkey.onPress = { [weak self] in self?.controller.hotkeyPressed() }
@@ -573,6 +579,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showMenu() {
         let menu = NSMenu()
+
+        if let warning = installLocationWarning {
+            let item = NSMenuItem(title: warning, action: #selector(revealForInstallFix),
+                                  keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+            menu.addItem(.separator())
+        }
 
         let status = NSMenuItem(title: controller.state.label, action: nil, keyEquivalent: "")
         status.isEnabled = false
@@ -887,6 +901,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func fixInputMonitoring() {
         promptForInputMonitoring()
+    }
+
+    /// "İzin verdim ama HER AÇILIŞTA yine soruyor" şikâyetinin gerçek dünyada
+    /// bildirilen sebebi: uygulama Uygulamalar klasörüne taşınmadan (zip'ten
+    /// çıkarıldığı yerden — Masaüstü/İndirilenler) çalıştırılıyorsa Gatekeeper
+    /// onu "App Translocation" ile her seferinde farklı, gizli/geçici bir
+    /// yoldan başlatır. TCC izinleri konuma bağlı olduğu için, yol her açılışta
+    /// değişince izin de hiç kalıcı olmuyor — Ayarlar'da "açık" görünse bile.
+    /// Bu, tek seferlik "izin verildi ama görünmüyor" (relaunch ile çözülen,
+    /// bkz. `relaunchApp()`) durumundan FARKLI bir hata sınıfı: relaunch bunu
+    /// çözmez, çünkü sorun süreç önbelleği değil, konumun kendisi.
+    private func checkInstallLocation() {
+        let path = Bundle.main.bundlePath
+        let translocated = path.contains("AppTranslocation")
+        let wrongPlace = !path.hasPrefix("/Applications/")
+        guard translocated || wrongPlace else { return }
+
+        let reason = translocated
+            ? "Gatekeeper onu geçici/gizli bir konumdan çalıştırıyor"
+            : "Uygulamalar klasöründe değil"
+        Trace.log("KURULUM SORUNU — \(reason): \(path)")
+
+        let message = "⚠️ Katip'i Uygulamalar'a taşı — yoksa izinler her açılışta sıfırlanır"
+        installLocationWarning = message
+        if let hud, HUDPanel.isEnabled {
+            hud.present(notice: message)   // flash() değil — kalıcı, kendiliğinden kapanmaz
+        }
+    }
+
+    /// Translocation'da bile Finder'da göstermek işe yarar: kullanıcı oradan
+    /// Uygulamalar'a sürükleyince macOS gerçek dosyayı doğru taşıyor.
+    @objc private func revealForInstallFix() {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: Bundle.main.bundlePath)])
     }
 
     @objc private func fixAccessibility() {
@@ -1283,7 +1330,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func render(_ state: DictationController.State) {
         hud?.update(state: state, level: controller.inputLevel)
         guard let button = statusItem.button else { return }
-        button.toolTip = "Katip — \(state.label)"
+        button.toolTip = installLocationWarning ?? "Katip — \(state.label)"
 
         switch state {
         case .recording, .locked:
