@@ -923,11 +923,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             : "Uygulamalar klasöründe değil"
         Trace.log("KURULUM SORUNU — \(reason): \(path)")
 
+        // Uzaktaki kullanıcı Finder'da sürüklemeyi bilmiyor/yapmıyor olabilir —
+        // önce KENDİMİZ taşımayı dene, kullanıcıdan hiçbir şey istemeden.
+        // KATIP_NO_AUTORELOCATE: geliştirme sırasında scratch dizinlerden test
+        // ederken gerçek /Applications/Katip.app'in üstüne yazılmasını engeller.
+        if ProcessInfo.processInfo.environment["KATIP_NO_AUTORELOCATE"] == nil,
+           attemptAutoRelocate() {
+            return   // yeni süreç açılıyor, bu süreç birazdan kendini kapatacak
+        }
+
         let message = "⚠️ Katip'i Uygulamalar'a taşı — yoksa izinler her açılışta sıfırlanır"
         installLocationWarning = message
         if let hud, HUDPanel.isEnabled {
             hud.present(notice: message)   // flash() değil — kalıcı, kendiliğinden kapanmaz
         }
+    }
+
+    /// Kendini `/Applications/Katip.app`'e kopyalayıp oradan yeniden başlatır.
+    /// Başarısızsa (yazma izni yok, disk dolu vb.) `false` döner — çağıran
+    /// yerine manuel uyarıya düşer. Translocated bir yoldan OKUMAK sorunsuz
+    /// çalışır (translocation sadece taşımayı/yeniden adlandırmayı kısıtlıyor,
+    /// okumayı değil), bu yüzden kopyalama translocated durumda da işe yarar.
+    private func attemptAutoRelocate() -> Bool {
+        let dest = "/Applications/Katip.app"
+        let source = Bundle.main.bundlePath
+        guard source != dest else { return false }
+        let fm = FileManager.default
+        do {
+            if fm.fileExists(atPath: dest) { try fm.removeItem(atPath: dest) }
+            try fm.copyItem(atPath: source, toPath: dest)
+        } catch {
+            Trace.log("otomatik taşıma başarısız: \(error.localizedDescription)")
+            return false
+        }
+        Trace.log("otomatik taşındı → \(dest), yeniden başlatılıyor")
+        let safeDest = dest.replacingOccurrences(of: "'", with: "'\\''")
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "sleep 0.7; open '\(safeDest)'"]
+        try? task.run()
+        NSApp.terminate(nil)
+        return true
     }
 
     /// Translocation'da bile Finder'da göstermek işe yarar: kullanıcı oradan
