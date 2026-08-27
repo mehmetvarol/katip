@@ -1447,13 +1447,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         smoothedLevel += (raw - smoothedLevel) * 0.4
         let value = Double(max(0.05, smoothedLevel))
 
+        // `contentTintColor` + `isTemplate` ile kırmızıya boyamayı denedik —
+        // değişken-değerli ("variableValue") SF Symbol'lerde tonlama
+        // uygulanmıyor (gerçek kullanımda doğrulandı: ikon hep siyah/gri
+        // kaldı). Rengi doğrudan sembol yapılandırmasına gömmek güvenilir
+        // olan yol; template/tint'e bağımlı değil.
+        let tint: NSColor = controller.state == .locked ? .systemOrange : .systemRed
+        let config = NSImage.SymbolConfiguration(paletteColors: [tint])
         button.image = NSImage(systemSymbolName: "waveform",
                                variableValue: value,
-                               accessibilityDescription: "Dinliyor")
-        // false idi: sabit siyah render ediliyordu, koyu menü çubuğunda
-        // ikon neredeyse görünmüyordu. template=true sistemin kendi
-        // menü çubuğu rengine (açık/koyu, seçili/değil) otomatik uyuyor.
-        button.image?.isTemplate = true
+                               accessibilityDescription: "Dinliyor")?
+            .withSymbolConfiguration(config)
+        button.image?.isTemplate = false
     }
 
     /// Çeviri sırasında native yükleniyor topacı.
