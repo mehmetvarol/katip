@@ -23,6 +23,7 @@ final class HUDPanel: NSPanel {
         case collapsed
         case expanded
         case listening
+        case transcribing
         case notice(String)
         case result(String)
     }
@@ -99,10 +100,15 @@ final class HUDPanel: NSPanel {
 
     private func naturalMode(for state: DictationController.State) -> Mode {
         switch state {
-        case .recording, .locked, .transcribing:
+        case .recording, .locked:
             // Yeni dikte başladıysa eski sonuç kartı kalkmalı — yoksa konuşurken
             // ekranda bir önceki metin duruyor.
             return .listening
+        case .transcribing:
+            // Kayıt bitti, ✕/✓ düğmeleri artık anlamsız (iptal edecek/bitirecek
+            // bir kayıt yok) — ayrı bir biçim, "donmuş" hissi vermesin diye
+            // açıkça "çevriliyor" diyor.
+            return .transcribing
         default:
             if let pinnedMode { return pinnedMode }
             return hovering ? .expanded : .collapsed
@@ -138,7 +144,7 @@ final class HUDPanel: NSPanel {
     private func applyHover() {
         guard pinnedMode == nil else { return }
         switch mode {
-        case .listening: return                      // kayıt sürerken karışma
+        case .listening, .transcribing: return        // kayıt/çeviri sürerken karışma
         default: setMode(hovering ? .expanded : .collapsed)
         }
     }
@@ -567,10 +573,13 @@ private final class CardView: NSView, NSViewToolTipOwner {
         case .collapsed: NSSize(width: 58, height: 18)
         case .expanded:  NSSize(width: 88, height: 58)
         case .listening: NSSize(width: 112, height: 26)
+        case .transcribing: NSSize(width: textWidth(Self.transcribingText, 10) + 46, height: 26)
         case .notice(let text): NSSize(width: min(280, max(132, textWidth(text, 10) + 62)), height: 26)
         case .result:    NSSize(width: 224, height: 116)
         }
     }
+
+    static let transcribingText = "Yazıya çevriliyor…"
 
     private static func textWidth(_ text: String, _ points: CGFloat) -> CGFloat {
         (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: points)]).width
@@ -880,6 +889,11 @@ private final class CardView: NSView, NSViewToolTipOwner {
             l.wave = NSRect(x: gap, y: bounds.minY + 4,
                             width: bounds.width - 2 * gap, height: bounds.height - 8)
 
+        case .transcribing:
+            // Düğme yok — kayıt bitti, iptal/bitir edilecek bir şey kalmadı.
+            l.mark = NSRect(x: 12, y: bounds.midY - 6, width: 12, height: 12)
+            l.body = NSRect(x: 30, y: bounds.midY - 7, width: bounds.width - 30 - 10, height: 15)
+
         case .notice:
             l.mark = NSRect(x: 9, y: bounds.midY - 5, width: 11, height: 11)
             l.body = NSRect(x: 25, y: bounds.midY - 7, width: bounds.width - 25 - 27, height: 15)
@@ -938,6 +952,12 @@ private final class CardView: NSView, NSViewToolTipOwner {
             fillSurface(bounds, radius: bounds.height / 2)
             for (action, rect) in l.buttons { drawCircle(action, rect) }
             drawWave(in: l.wave)
+
+        case .transcribing:
+            fillSurface(bounds, radius: bounds.height / 2)
+            drawSpinner(in: l.mark, phase: phase, color: Self.primary)
+            draw(Self.transcribingText, in: l.body, points: 11, weight: .regular,
+                color: Self.glyph, align: .left)
 
         case .notice(let text):
             fillSurface(bounds, radius: bounds.height / 2)
@@ -1057,6 +1077,21 @@ private final class CardView: NSView, NSViewToolTipOwner {
             let rect = NSRect(x: x, y: area.midY - height / 2, width: barWidth, height: height)
             NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2).fill()
         }
+    }
+
+    /// Klasik döner yükleniyor göstergesi — 270° yay, `phase` arttıkça döner.
+    /// SF Symbol animasyonuna gerek yok, tek bir çizgi çizip döndürmek yeterli.
+    private func drawSpinner(in rect: NSRect, phase: CGFloat, color: NSColor) {
+        let center = NSPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        let start = (phase * 90).truncatingRemainder(dividingBy: 360)
+        let path = NSBezierPath()
+        path.appendArc(withCenter: center, radius: radius,
+                       startAngle: start, endAngle: start + 270, clockwise: false)
+        path.lineWidth = 1.6
+        path.lineCapStyle = .round
+        color.setStroke()
+        path.stroke()
     }
 
     private func drawSymbol(_ name: String, in rect: NSRect, points: CGFloat, color: NSColor) {

@@ -501,6 +501,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             HUDPanel.renderSample(mode: .listening, levels: wave,
                                   to: dir + "/card-listening.png", ticks: 16)
+            // Çeviri sırasında dönen gösterge — dört kare, döndüğünü kanıtla.
+            for (index, ticks) in [4, 10, 16, 22].enumerated() {
+                HUDPanel.renderSample(mode: .transcribing, levels: flat,
+                                      to: dir + "/card-transcribing-\(index).png", ticks: ticks)
+            }
             // NOT: buradaki "seviye" render'ları KALDIRILDI. Kazanç artık
             // uyarlanır olduğu için sabit bir seviyeyi beslemek anlamsız —
             // referans o seviyeye yakınsıyor ve her seviye aynı görünüyor.
@@ -1445,7 +1450,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.image = NSImage(systemSymbolName: "waveform",
                                variableValue: value,
                                accessibilityDescription: "Dinliyor")
-        button.image?.isTemplate = false
+        // false idi: sabit siyah render ediliyordu, koyu menü çubuğunda
+        // ikon neredeyse görünmüyordu. template=true sistemin kendi
+        // menü çubuğu rengine (açık/koyu, seçili/değil) otomatik uyuyor.
+        button.image?.isTemplate = true
     }
 
     /// Çeviri sırasında native yükleniyor topacı.
