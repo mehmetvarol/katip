@@ -393,13 +393,25 @@ final class HUDPanel: NSPanel {
     /// başlatılıyor. Böylece sürükleme ile animasyon arasında dikiş kalmıyor.
     private func snapToNearestEdge(velocity: NSPoint) {
         guard let visible = NSScreen.main?.visibleFrame else { return }
-        let origin = Self.landingOrigin(frame: frame, visible: visible, velocity: velocity)
+
+        // `frame.size` DEĞİL: bu, tıklamanın (ör. ✓ ile bitirme) AYNI mouseUp
+        // içinde tetiklediği bir mod değişikliğinden (`.listening` →
+        // `.transcribing`) hemen SONRA çağrılıyor. O mod değişikliği kendi
+        // `animate(to:)` çağrısını YAPMIŞTI ama springs henüz hiç adım
+        // atmadığı için `frame` hâlâ ESKİ boyutta — `frame.size` kullanmak bu
+        // yeni yayı geçersiz kılıp kartı YANLIŞ (eski) boyuta geri
+        // hedefliyordu. Gerçek dünyada bulundu: karta tıklayınca "yazıya
+        // çevriliyor" hiç görünmüyordu, sadece kısayolda görünüyordu — çünkü
+        // kısayol bu kod yolundan (mouseUp/snapToNearestEdge) hiç geçmiyor.
+        let size = CardView.size(for: card.mode)
+        let origin = Self.landingOrigin(frame: NSRect(origin: frame.origin, size: size),
+                                        visible: visible, velocity: velocity)
 
         // Fiske varsa hafif aşma (fiziksel his), yavaş bırakmada yok — hareketi
         // başlatan jest momentum taşımıyorsa zıplamak yapay duruyor.
         let flicked = hypot(velocity.x, velocity.y) > Self.flickVelocity
         Trace.log("bırakma hızı \(Int(hypot(velocity.x, velocity.y))) px/sn — \(flicked ? "FİSKE" : "yavaş")")
-        animate(to: NSRect(origin: origin, size: frame.size),
+        animate(to: NSRect(origin: origin, size: size),
                 damping: flicked ? 0.8 : 1.0, response: 0.4, velocity: velocity)
     }
 
