@@ -4,26 +4,25 @@ import IOKit.hid
 
 /// Kısayol tuşu seçenekleri. Menüden değiştirilebilir, UserDefaults'ta saklanır.
 enum HotkeyChoice: String, CaseIterable {
-    // "Sağ Control" bilerek YOK: standart Apple klavyelerinde (MacBook,
-    // Magic Keyboard) fiziksel sağ Control tuşu yok — kVK_RightControl
-    // hiçbir gerçek tuş basışıyla gelmiyor, seçenek sessizce hiçbir şey
-    // yapmıyordu. Kullanıcı gerçek kullanımda fark etti.
+    // "Sağ Control" ve F13-F19 bilerek YOK.
+    // Sağ Control: standart Apple klavyelerinde (MacBook, Magic Keyboard)
+    // fiziksel sağ Control tuşu yok — kVK_RightControl hiçbir gerçek tuş
+    // basışıyla gelmiyor, seçenek sessizce hiçbir şey yapmıyordu.
+    // F13-F19: Mac'te yaygın kullanılan tuşlar değil (kullanıcı isteği,
+    // 2026-08-27) — sol taraf seçenekleri daha kullanışlı bir alternatif.
+    case leftOption, leftCommand, leftControl, leftShift
     case rightOption, rightCommand, rightShift
-    case f13, f14, f15, f16, f17, f18, f19
     case disabled
 
     var title: String {
         switch self {
+        case .leftOption:   "Sol Option (⌥)"
+        case .leftCommand:  "Sol Command (⌘)"
+        case .leftControl:  "Sol Control (⌃)"
+        case .leftShift:    "Sol Shift (⇧)"
         case .rightOption:  "Sağ Option (⌥)"
         case .rightCommand: "Sağ Command (⌘)"
         case .rightShift:   "Sağ Shift (⇧)"
-        case .f13: "F13"
-        case .f14: "F14"
-        case .f15: "F15"
-        case .f16: "F16"
-        case .f17: "F17"
-        case .f18: "F18"
-        case .f19: "F19"
         case .disabled: "Kapalı"
         }
     }
@@ -31,35 +30,24 @@ enum HotkeyChoice: String, CaseIterable {
     /// Yüzen karttaki kısa gösterim — "Sağ Option (⌥)" oraya sığmıyor.
     var glyph: String {
         switch self {
-        case .rightOption:  "⌥"
-        case .rightCommand: "⌘"
-        case .rightShift:   "⇧"
-        case .disabled:     ""
-        default:            title
+        case .leftOption, .rightOption:   "⌥"
+        case .leftCommand, .rightCommand: "⌘"
+        case .leftControl:                "⌃"
+        case .leftShift, .rightShift:     "⇧"
+        case .disabled:                   ""
         }
     }
 
-    /// Modifier tuşları `flagsChanged` ile, F-tuşları `keyDown/keyUp` ile gelir.
-    var isModifier: Bool {
-        switch self {
-        case .rightOption, .rightCommand, .rightShift: true
-        default: false
-        }
-    }
-
-    /// Sağ/sol ayrımı için ham sanal tuş kodu (modifier'larda flagsChanged.keyCode).
+    /// Sağ/sol ayrımı için ham sanal tuş kodu (flagsChanged.keyCode).
     var keyCode: CGKeyCode? {
         switch self {
+        case .leftOption:   CGKeyCode(kVK_Option)
+        case .leftCommand:  CGKeyCode(kVK_Command)
+        case .leftControl:  CGKeyCode(kVK_Control)
+        case .leftShift:    CGKeyCode(kVK_Shift)
         case .rightOption:  CGKeyCode(kVK_RightOption)
         case .rightCommand: CGKeyCode(kVK_RightCommand)
         case .rightShift:   CGKeyCode(kVK_RightShift)
-        case .f13: CGKeyCode(kVK_F13)
-        case .f14: CGKeyCode(kVK_F14)
-        case .f15: CGKeyCode(kVK_F15)
-        case .f16: CGKeyCode(kVK_F16)
-        case .f17: CGKeyCode(kVK_F17)
-        case .f18: CGKeyCode(kVK_F18)
-        case .f19: CGKeyCode(kVK_F19)
         case .disabled: nil
         }
     }
@@ -67,10 +55,11 @@ enum HotkeyChoice: String, CaseIterable {
     /// Modifier'ın basılı olup olmadığını anlamak için bayrak maskesi.
     var flag: CGEventFlags? {
         switch self {
-        case .rightOption:  .maskAlternate
-        case .rightCommand: .maskCommand
-        case .rightShift:   .maskShift
-        default: nil
+        case .leftOption, .rightOption:   .maskAlternate
+        case .leftCommand, .rightCommand: .maskCommand
+        case .leftControl:                .maskControl
+        case .leftShift, .rightShift:     .maskShift
+        case .disabled: nil
         }
     }
 
@@ -104,16 +93,16 @@ final class HotkeyMonitor {
         stop()
         guard HotkeyChoice.current != .disabled else { return }
 
-        let mask = (1 << CGEventType.flagsChanged.rawValue)
-                 | (1 << CGEventType.keyDown.rawValue)
-                 | (1 << CGEventType.keyUp.rawValue)
+        // Tüm seçenekler modifier (F-tuşu seçeneği kaldırıldı) — sadece
+        // flagsChanged yeterli, her tuş vuruşunu dinlemeye gerek yok.
+        let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
 
         let context = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .listenOnly,          // olayı tüketmiyoruz, sadece dinliyoruz
-            eventsOfInterest: CGEventMask(mask),
+            eventsOfInterest: mask,
             callback: { _, type, event, refcon in
                 guard let refcon else { return Unmanaged.passUnretained(event) }
                 let monitor = Unmanaged<HotkeyMonitor>.fromOpaque(refcon).takeUnretainedValue()
@@ -159,19 +148,12 @@ final class HotkeyMonitor {
         }
 
         let choice = HotkeyChoice.current
-        guard let wanted = choice.keyCode else { return }
-
-        if choice.isModifier {
-            guard type == .flagsChanged, keyCode == wanted, let flag = choice.flag else { return }
-            let down = flags.contains(flag)
-            guard down != isDown else { return }
-            isDown = down
-            Trace.log(down ? "kısayol BASILDI" : "kısayol BIRAKILDI")
-            down ? onPress?() : onRelease?()
-        } else {
-            guard keyCode == wanted else { return }
-            if type == .keyDown, !isDown { isDown = true; Trace.log("kısayol BASILDI"); onPress?() }
-            if type == .keyUp, isDown { isDown = false; Trace.log("kısayol BIRAKILDI"); onRelease?() }
-        }
+        guard let wanted = choice.keyCode,
+              type == .flagsChanged, keyCode == wanted, let flag = choice.flag else { return }
+        let down = flags.contains(flag)
+        guard down != isDown else { return }
+        isDown = down
+        Trace.log(down ? "kısayol BASILDI" : "kısayol BIRAKILDI")
+        down ? onPress?() : onRelease?()
     }
 }
