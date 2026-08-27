@@ -712,14 +712,26 @@ private final class CardView: NSView, NSViewToolTipOwner {
     }
 
     override func mouseUp(with event: NSEvent) {
-        defer {
-            (window as? HUDPanel)?.setDragging(false)
-            super.mouseUp(with: event)
-        }
+        let panel = window as? HUDPanel
+        defer { super.mouseUp(with: event) }
         guard let start = dragOrigin, let now = window?.frame.origin,
-              hypot(now.x - start.x, now.y - start.y) < 4 else { return }
+              hypot(now.x - start.x, now.y - start.y) < 4 else {
+            panel?.setDragging(false)
+            return
+        }
 
         let point = convert(event.locationInWindow, from: nil)
+        // `setDragging(false)` (dragging=false yapıp kenara yapıştırır)
+        // ÖNCE çalışmalı: `onAction` bir mod değişikliğine yol açabilir
+        // (ör. ✓ ile bitirme → .transcribing) ve `setMode()` sürüklerken
+        // hiçbir şey yapmıyor (`guard !dragging`). `mouseDown` HER basışta
+        // `dragging = true` yapıyor — gerçek bir sürükleme olmasa bile
+        // (salt tıklama). Sıra ters olsaydı `onAction` HÂLÂ dragging=true
+        // iken ateşlenir, mod değişikliği sessizce YOK SAYILIRDI.
+        // Gerçek dünyada bulundu: karttaki ✓'a tıklayınca "çevriliyor"
+        // hiç görünmüyordu, kısayolda görünüyordu (o yol mouseUp'tan
+        // hiç geçmiyor, dragging hiç true olmuyor).
+        panel?.setDragging(false)
         // Boş alana tıklamak sadece kapalı çubukta iş yapar; açık biçimde
         // düğmelerin arası taşıma tutamağıdır.
         if let hit = plan().hitTest(point) { onAction?(hit) }
