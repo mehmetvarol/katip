@@ -73,6 +73,12 @@ actor Transcriber {
     /// ile sınırlandı: 40 + 32 = 72, tavanın altında, ~0.8 sn'ye mal oluyor.
     static let glossaryTokenBudget = 40
 
+    /// Çoklu dilde birincil adayı yedek denemeden kabul etme eşiği
+    /// (ortalama log-olasılık). 117 gerçek tr,en diktede simüle edildi:
+    /// -0.2 → yedek %26, -0.3 → %18, -0.4 ve altı → %14 ama farklı sonuç
+    /// sayısı artıyor (7 → 10). -0.3 dengesi seçildi.
+    static let acceptScore: Float = -0.3
+
     /// Ölçüm için model/sözlük değiştirilebilir; uygulama varsayılanları kullanır.
     ///
     /// `onDownloadProgress`: yalnızca model diskte YOKSA (ilk çalıştırma) çağrılır —
@@ -186,15 +192,26 @@ actor Transcriber {
             return try await transcribeOnce(samples, language: languages.first ?? "tr", context: context).text
 
         case .fixed(let languages):
-            // Birden fazla dil işaretliyse HER BİRİ için ayrı tam geçiş yapılıp
-            // en güvenilir sonuç seçiliyor. Whisper'ın tek geçişte "bu dillerden
-            // biri" diye çalışan bir modu yok — bu, o eksikliği taklit eden tek
-            // yol. Bedeli açık: N dil = N kat süre. Kullanıcı bunu bilerek seçti.
+            // Birden fazla dil işaretliyse KADEMELİ: ilk dil birincil, diğerleri
+            // yedek. Whisper'ın tek geçişte "bu dillerden biri" diye çalışan bir
+            // modu yok, her dil ayrı tam geçiş demek.
+            //
+            // ESKİDEN hepsi her seferinde deneniyordu (N dil = N kat süre).
+            // Gerçek kullanımda ölçüldü (117 tr,en dikte): %72'sinde iki aday
+            // BİREBİR aynı metni üretti — ikinci geçiş saf gecikmeydi, "kısa
+            // konuşmada bile uzun bekliyorum" şikâyetinin kaynağı buydu.
+            // Aynı kayıtlarda simülasyon: birincil boş değilse ve skoru
+            // `acceptScore`'un üstündeyse durmak ikinci geçişi %18'e indiriyor,
+            // birincilin BOŞ döndüğü vakaları (4 kez) yedek hâlâ kurtarıyor,
+            // kayıp sıfır; farklı çıkan 7 sonuç büyük harf/noktalama düzeyinde.
             Trace.log("çoklu dil denemesi: \(languages.joined(separator: ", "))")
             var best: (text: String, score: Float)?
             for language in languages {
                 let candidate = try await transcribeOnce(samples, language: language, context: context)
                 Trace.log("  \(language) → skor \(String(format: "%.2f", candidate.score)) → \"\(candidate.text.prefix(50))\"")
+                if best == nil, !candidate.text.isEmpty, candidate.score >= Self.acceptScore {
+                    return candidate.text   // birincil yeterince güvenli — yedeğe gerek yok
+                }
                 // Boş metin asla dolu metni yenmez — skor ne olursa olsun.
                 // Yanlış dilde zorlanan ses çoğu zaman boş/neredeyse-boş bir
                 // segment üretiyor ve WhisperKit buna 0.0 gibi yüksek bir
