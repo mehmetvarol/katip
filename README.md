@@ -108,6 +108,13 @@ var. Dil, kısayol tuşu ve ayar dosyaları menü kapanmadan satırın altında
 açılır; sözlük, yüzen kart ve girişte başlat birer aç/kapa anahtarı. Esc
 kapatır, ⌘H geçmişi açar, ⌘Q çıkar.
 
+**Güncellemeler:** menüdeki **"Güncellemeleri denetle"** GitHub'daki en son
+sürüme bakar; yeni sürüm varsa tek tıkla indirir, doğrular (paket kimliği,
+sürüm, kod imzası), kurar ve Katip'i yeniden başlatır. Yalnızca bu düğmeye
+bastığında ağa çıkar — arka planda kendiliğinden denetleme yok. İndirilen
+sürüm ad-hoc imzalı olduğu için güncellemeden sonra izinleri yeniden vermen
+gerekebilir; menünün en üstündeki İzinler bölümü seni yönlendirir.
+
 ## Yüzen kart
 
 Masaüstünde duran, şekil değiştiren bir gösterge — boşta ince bir çizgi,
@@ -152,7 +159,8 @@ Ayarlar düz metin dosyaları olarak `~/Library/Application Support/Katip/` alt�
 
 > Sesin `recordings/` altında duruyor. Son 20 kayıtla sınırlı ve geçmiş
 > penceresindeki **Sesleri sil** ile tamamen silinebilir. Hiçbir yere
-> gönderilmiyor — bu uygulamada ağ trafiği yok.
+> gönderilmiyor. Katip'in ağa çıktığı yalnızca iki an var: ilk açılışta modelin
+> inmesi ve senin **Güncellemeleri denetle**'ye basman.
 
 ## Gereksinimler
 

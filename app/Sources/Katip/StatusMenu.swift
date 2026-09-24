@@ -50,6 +50,8 @@ final class StatusMenu: NSPanel {
         case pill(String, NSColor)
         case badges([String])        // izinlerin yeşil rozetleri
         case hoverSymbol(String)     // yalnızca fare üstündeyken görünür
+        case spinner                 // süren bir iş (güncelleme denetimi)
+        case progress(Double)        // indirme yüzdesi
     }
 
     enum Tone { case normal, soft, dim, warning, danger, primary }
@@ -749,6 +751,31 @@ private final class StatusMenuView: NSView {
                 minX = circle.minX - 4
             }
             return minX
+
+        case .spinner:
+            let center = NSPoint(x: right - 7, y: rect.midY)
+            let start = CGFloat(reduceMotion ? 0 : (time * 400).truncatingRemainder(dividingBy: 360))
+            let arc = NSBezierPath()
+            arc.appendArc(withCenter: center, radius: 5.5, startAngle: start, endAngle: start + 270, clockwise: false)
+            arc.lineWidth = 1.6
+            arc.lineCapStyle = .round
+            textSecondary.setStroke()
+            arc.stroke()
+            return right - 14
+
+        case .progress(let fraction):
+            let label = NSAttributedString(string: "%\(Int((fraction * 100).rounded()))", attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular), .foregroundColor: textSecondary])
+            let size = label.size()
+            label.draw(at: NSPoint(x: right - size.width, y: rect.midY - size.height / 2))
+            let track = NSRect(x: right - size.width - 8 - 60, y: rect.midY - 2, width: 60, height: 4)
+            NSColor(white: 1, alpha: 0.1).setFill()
+            NSBezierPath(roundedRect: track, xRadius: 2, yRadius: 2).fill()
+            var fill = track
+            fill.size.width = max(4, track.width * CGFloat(min(1, max(0, fraction))))
+            NSColor.systemBlue.setFill()
+            NSBezierPath(roundedRect: fill, xRadius: 2, yRadius: 2).fill()
+            return track.minX
 
         case .hoverSymbol(let name):
             if hover > 0.01 {

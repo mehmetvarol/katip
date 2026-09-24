@@ -62,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let controller = DictationController()
     private let hotkey = HotkeyMonitor()
+    private let updater = Updater()
     private var animationTimer: Timer?
     /// İkonun dolumu — yüzen kartın dalgasıyla AYNI uyarlanır ölçer.
     private var iconMeter = LevelMeter()
@@ -549,6 +550,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Güncelleyiciyi uçtan uca sınar — gerçek GitHub API'si ve gerçek zip,
+        // ama kurulum SAHTE bir uygulamanın yerine (gerçek /Applications/Katip.app'e
+        // dokunmaz): `Katip --updateprobe <geçici-dizin>`.
+        if let index = CommandLine.arguments.firstIndex(of: "--updateprobe") {
+            let dir = URL(fileURLWithPath: CommandLine.arguments.dropFirst(index + 1).first ?? NSTemporaryDirectory())
+            Task { @MainActor in
+                var failed = 0
+                func expect(_ ok: Bool, _ label: String) { print((ok ? "✔ " : "✗ ") + label); if !ok { failed += 1 } }
+
+                print("═══ sürüm karşılaştırma ═══")
+                expect(Updater.isNewer("0.2.10", than: "0.2.9"), "0.2.10 > 0.2.9 (dize sırası değil)")
+                expect(!Updater.isNewer("0.2.20", than: "0.2.20"), "aynı sürüm güncelleme sayılmaz")
+                expect(!Updater.isNewer("0.2.19", than: "0.2.20"), "eski sürüm güncelleme sayılmaz")
+                expect(Updater.isNewer("0.3", than: "0.2.99"), "0.3 > 0.2.99")
+
+                print("\n═══ GitHub API ═══")
+                guard let release = try? await Updater.fetchLatest() else {
+                    print("✗ en son sürüm okunamadı"); exit(1)
+                }
+                print("en son: \(release.version) · \(release.size) bayt · \(release.zipURL.lastPathComponent)")
+
+                func fakeApp(version: String) throws -> URL {
+                    let app = dir.appendingPathComponent("Sahte-\(UUID().uuidString.prefix(6)).app")
+                    try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents"),
+                                                            withIntermediateDirectories: true)
+                    let plist: NSDictionary = ["CFBundleIdentifier": "dev.mvrl.katip", "CFBundleShortVersionString": version]
+                    plist.write(to: app.appendingPathComponent("Contents/Info.plist"), atomically: true)
+                    return app
+                }
+                func version(of app: URL) -> String? {
+                    NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist"))?["CFBundleShortVersionString"] as? String
+                }
+
+                print("\n═══ indir + doğrula + kur (sahte hedef) ═══")
+                do {
+                    let zip = try await Updater.download(release.zipURL) { _ in }
+                    let target = try fakeApp(version: "0.0.1")
+                    try Updater.install(zip: zip, expectedVersion: release.version, bundleID: "dev.mvrl.katip", replacing: target)
+                    expect(version(of: target) == release.version, "hedef \(release.version) oldu")
+                    let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: dir.path))?
+                        .filter { $0.hasPrefix(".Katip-eski") } ?? []
+                    expect(leftovers.isEmpty, "yedek kopya temizlendi")
+                } catch { expect(false, "kurulum: \(Updater.describe(error))") }
+
+                print("\n═══ reddetme: yanlış sürüm / yanlış kimlik → hedefe dokunulmamalı ═══")
+                for (label, expectedVersion, bundleID) in [("yanlış sürüm", "9.9.9", "dev.mvrl.katip"),
+                                                            ("yanlış kimlik", release.version, "com.baska.uygulama")] {
+                    do {
+                        let zip = try await Updater.download(release.zipURL) { _ in }
+                        let target = try fakeApp(version: "0.0.1")
+                        do {
+                            try Updater.install(zip: zip, expectedVersion: expectedVersion, bundleID: bundleID, replacing: target)
+                            expect(false, "\(label): KABUL EDİLDİ")
+                        } catch {
+                            expect(version(of: target) == "0.0.1", "\(label) reddedildi, hedef sağlam — \(Updater.describe(error))")
+                        }
+                    } catch { expect(false, "\(label): indirme \(error)") }
+                }
+
+                print(failed == 0 ? "\n✔ güncelleyici sağlam" : "\n✗ \(failed) kontrol başarısız")
+                exit(failed == 0 ? 0 : 1)
+            }
+            return
+        }
+
         // Menü çubuğu menüsünü ve ikonlarını ekransız PNG'ye çizer — tasarımla
         // karşılaştırmak için (`Katip --rendermenu <dizin>`).
         if CommandLine.arguments.contains("--rendermenu") {
@@ -569,6 +635,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             StatusMenu.renderSample(with(.transcribing, .none), to: dir + "/menu-transcribing.png")
             StatusMenu.renderSample(with(.downloading(0.42), .text("İlk açılışta bir kez · ~1.6 GB"), progress: 0.42),
                                     to: dir + "/menu-download.png")
+            let sampleRelease = Updater.Release(
+                version: "0.2.21", zipURL: URL(string: "https://example.invalid/Katip.zip")!,
+                pageURL: URL(string: "https://github.com/mehmetvarol/katip/releases")!, size: 2_652_678)
+            for (name, state) in [("idle", Updater.State.idle), ("checking", .checking), ("uptodate", .upToDate("0.2.20")),
+                                  ("available", .available(sampleRelease)), ("downloading", .downloading(0.42)),
+                                  ("failed", .failed("İnternet bağlantısı yok"))] {
+                updater.preview(state)
+                var elements = statusMenuElements()
+                elements[0] = .header(.init(version: version, status: .ready, hint: .idle("⌥")))
+                StatusMenu.renderSample(elements, to: dir + "/menu-update-\(name).png")
+            }
+            updater.preview(.idle)
             // İkonlar 8x büyütülmüş; template olanlar açık zeminde (sistem onları siyaha boyar).
             func saveIcon(_ image: NSImage, _ name: String, dark: Bool) {
                 let px = 18 * 8
@@ -642,6 +720,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.toolTip = "Katip"
         }
+
+        updater.onChange = { [weak self] in self?.statusMenu?.reload() }
+        updater.onInstalled = { [weak self] in self?.relaunchApp() }
 
         controller.onChange = { [weak self] state in
             self?.render(state)
@@ -789,9 +870,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                       .group("perms", permissions.rows + [restartRow()])]
         }
 
+        items += [.separator] + updateRows().map { .row($0) }
         items += [.separator, .row(Row(id: "quit", symbol: "rectangle.portrait.and.arrow.right", title: "Çık",
                                        accessory: .shortcut("⌘Q"), action: { NSApp.terminate(nil) }))]
         return items
+    }
+
+    /// "Güncellemeleri denetle" — yalnızca tıklayınca ağa çıkar (bkz. Updater).
+    private func updateRows() -> [StatusMenu.Row] {
+        typealias Row = StatusMenu.Row
+        let check: () -> Void = { [weak self] in Task { await self?.updater.check() } }
+        switch updater.state {
+        case .idle:
+            return [Row(id: "update", symbol: "arrow.triangle.2.circlepath", title: "Güncellemeleri denetle",
+                        caption: "Şu an \(Updater.currentVersion)", closes: false, action: check)]
+        case .checking:
+            return [Row(id: "update", symbol: "arrow.triangle.2.circlepath", title: "Denetleniyor…",
+                        accessory: .spinner)]
+        case .upToDate(let latest):
+            return [Row(id: "update", symbol: "checkmark.circle", title: "Katip güncel",
+                        caption: "\(latest) en son sürüm", accessory: .pill("Güncel", .systemGreen),
+                        closes: false, action: check)]
+        case .available(let release):
+            let megabytes = String(format: "%.1f MB", Double(release.size) / 1_048_576)
+            return [
+                Row(id: "update", symbol: "arrow.down.circle", title: "\(release.version) sürümüne güncelle",
+                    caption: "\(megabytes) · kurar ve yeniden başlatır", tone: .primary, closes: false,
+                    action: { [weak self] in Task { await self?.updater.downloadAndInstall(release) } }),
+                Row(id: "update-notes", symbol: "doc.text", title: "Neler yeni?", accessory: .link("GitHub"),
+                    action: { NSWorkspace.shared.open(release.pageURL) }),
+            ]
+        case .downloading(let fraction):
+            return [Row(id: "update", symbol: "arrow.down.circle", title: "İndiriliyor…",
+                        accessory: .progress(fraction))]
+        case .installing:
+            return [Row(id: "update", symbol: "arrow.down.circle", title: "Kuruluyor…",
+                        caption: "Katip birazdan yeniden açılacak", accessory: .spinner)]
+        case .failed(let message):
+            // Oksuz: ↗ dışarı bağlantı gibi duruyordu, oysa satır sadece yeniden denetliyor.
+            return [Row(id: "update", symbol: "exclamationmark.triangle", title: "Güncelleme başarısız — tekrar dene",
+                        caption: message, tone: .warning, closes: false, action: check)]
+        }
     }
 
     private func menuHeader(for state: DictationController.State, missing: Int) -> StatusMenu.Header {
