@@ -73,25 +73,40 @@ KATIP_SIGN_ID="Developer ID Application: Ad Soyad (TEAMID)" ./app/build.sh --run
 | İkona **sol tık** | Dinlemeye başlar · tekrar tık → yazıya çevirir |
 | Kısayola **basılı tut** | Bas-konuş |
 | Kısayola **çift bas** | 🔒 Kilit modu: elini çek, sürekli dinler · tuşa bas → bitir |
-| İkona **sağ tık** | Menü (kısayol, sözlük, geçmiş, ayarlar) |
+| İkona **sağ tık** | Menü: durum, geçmiş, dil, kısayol, sözlük, ayar dosyaları, izinler |
 
-Kısayol tuşu menüden seçilir (varsayılan **Sağ Option**): sağ tık → "Kısayol tuşu".
+Kısayol tuşu menüden seçilir (varsayılan **Sağ Option**): sağ tık → Dikte → **Kısayol**.
 Seçenekler: sol ya da sağ **Option**, **Command**, **Shift** ve **sol Control**
 (Apple klavyelerinde sağ Control tuşu yok).
 
 İlk çalıştırmada üç izin istenir — **Mikrofon**, **Erişilebilirlik** (metnin
 imlece yazılması için) ve **Giriş İzleme** (kısayol tuşu için), ayrıca ~1.6 GB
-model iner (menü çubuğu ikonu indirme yüzdesini gösterir).
+model iner (menü çubuğu ikonundaki halka ve menünün başlığı indirme yüzdesini gösterir).
 
-İzinleri verdikten sonra menüden **"🔄 Katip'i yeniden başlat"**ı seç — macOS
-izni çalışan uygulamaya ancak yeniden başlatınca yansıtıyor. Menüde bir izin
-**⛔️ REDDEDİLMİŞ** görünüyorsa sistem bir daha sormaz: Sistem Ayarları →
-Gizlilik ve Güvenlik'ten Katip'i elle aç (menüdeki satır oraya götürür).
+Eksik bir izin varsa menünün en üstünde **İzinler** bölümü çıkar; her izin için
+"İzin ver" satırı oradan istemi açar. İzinleri verdikten sonra aynı bölümdeki
+**"Katip'i yeniden başlat"**ı seç — macOS izni çalışan uygulamaya ancak yeniden
+başlatınca yansıtıyor. Bir izin **"reddedildi"** görünüyorsa sistem bir daha
+sormaz: satırdaki **Ayarlar** bağlantısı seni Gizlilik ve Güvenlik'e götürür,
+Katip'i orada elle aç. Her şey tamamsa izinler menünün altında tek satırda
+durur (açınca ayrıntı ve yeniden başlat).
 
 Durumu izlemek için:
 ```bash
 tail -f ~/Library/Application\ Support/Katip/katip.log
 ```
+
+## Menü çubuğu
+
+İkon durumu bakmadan anlatır: kayıtta mikrofonun gövdesi sesinle dolar
+(kırmızı; kilit modunda turuncu), yazıya çevirirken üç çubuk sırayla dalgalanır,
+ilk açılışta model inerken bir halka yüzdeyle dolar.
+
+Sağ tıkla açılan menü kartla aynı koyu yüzeyde: başlıkta Katip'in sürümü ve
+anlık durumu (Hazır, Dinliyor, Kilitli, Yazıya çevriliyor…) ile kısayol ipucu
+var. Dil, kısayol tuşu ve ayar dosyaları menü kapanmadan satırın altında
+açılır; sözlük, yüzen kart ve girişte başlat birer aç/kapa anahtarı. Esc
+kapatır, ⌘H geçmişi açar, ⌘Q çıkar.
 
 ## Yüzen kart
 
@@ -103,12 +118,13 @@ fizik tabanlı hareket kenara yapışır, ekran dışına asla tamamen çıkmaz.
 
 ## Diğer özellikler
 
-- **Geçmiş** (sağ tık → Geçmiş…) — aranabilir, 30 gün sonra otomatik silinir
+- **Geçmiş** (menü → Geçmiş, ⌘H) — aranabilir, 30 gün sonra otomatik silinir
 - **Yeniden çevir** — çeviri kötü çıktıysa geçmiş penceresinden aynı sesi
   tekrar çevirtebilirsin. Canlı diktenin aksine ses parçalanmadan tek seferde
   gidiyor, yani modele bütün bağlam birden veriliyor
 - **Sözlük** — sık bozulan teknik terimler için Whisper'a ipucu (varsayılan
-  açık, 10 terim); kendi terimlerini `glossary.txt`'e ekleyebilirsin
+  açık, 10 terim; menüdeki anahtarla hemen açılıp kapanır); kendi terimlerini
+  `glossary.txt`'e ekleyebilirsin
 - **Çoklu dil seçimi** — kartın küre ikonu birden fazla dili aynı anda
   işaretlemene izin verir. İlk dil asıl dil: sonucu boş değilse ve yeterince
   güvenliyse diğerleri hiç denenmez, böylece dikte yavaşlamaz; ilk dil boş ya da
@@ -119,9 +135,10 @@ fizik tabanlı hareket kenara yapışır, ekran dışına asla tamamen çıkmaz.
 - **Metin kısayolları** — söylediğin bir ifade hazır bir metin bloğuna genişler
 - **Projelerinden terim öğrenme** — `package.json` bağımlılıklarını tarayıp
   telaffuz kurallarını önerir (`Katip --learn ~/Desktop`)
-- **Girişte başlat** (sağ tık → Girişte başlat)
+- **Girişte başlat** (menü → Görünüm → Girişte başlat)
 
-Ayarlar düz metin dosyaları olarak `~/Library/Application Support/Katip/` altında:
+Ayarlar düz metin dosyaları olarak `~/Library/Application Support/Katip/` altında
+(menüdeki **Düzenle** grubundan açılır):
 
 | Dosya | Ne işe yarar |
 |---|---|
