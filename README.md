@@ -66,6 +66,17 @@ Kendi Apple Developer Program kimliğin varsa kalıcı izin için:
 KATIP_SIGN_ID="Developer ID Application: Ad Soyad (TEAMID)" ./app/build.sh --run
 ```
 
+### Güncelleme
+
+- **Zip ile kurduysan (v0.2.21 ve sonrası):** menü → **Güncellemeleri denetle**.
+  Yeni sürümü indirir, doğrular, kurar ve Katip'i yeniden başlatır.
+- **v0.2.20 veya daha eskiyse:** o sürümlerde düğme yok — son zip'i bir kez
+  elle indirip kur; sonraki güncellemeler düğmeyle gelir.
+- **Kaynaktan derlediysen:** `git pull && ./app/build.sh --run` kullan, düğmeyi
+  değil. Düğme GitHub'daki ad-hoc imzalı sürümü kurar; kendi Apple Development
+  imzanın yerini aldığı için izinler yeniden istenir ve sonraki derlemelerde de
+  kalıcı olmaz.
+
 ## Kullanım
 
 | Jest | Ne olur |
@@ -73,7 +84,7 @@ KATIP_SIGN_ID="Developer ID Application: Ad Soyad (TEAMID)" ./app/build.sh --run
 | İkona **sol tık** | Dinlemeye başlar · tekrar tık → yazıya çevirir |
 | Kısayola **basılı tut** | Bas-konuş |
 | Kısayola **çift bas** | 🔒 Kilit modu: elini çek, sürekli dinler · tuşa bas → bitir |
-| İkona **sağ tık** | Menü: durum, geçmiş, dil, kısayol, sözlük, ayar dosyaları, izinler |
+| İkona **sağ tık** | Menü: durum, geçmiş, dil, kısayol, sözlük, ayar dosyaları, izinler, güncelleme |
 
 Kısayol tuşu menüden seçilir (varsayılan **Sağ Option**): sağ tık → Dikte → **Kısayol**.
 Seçenekler: sol ya da sağ **Option**, **Command**, **Shift** ve **sol Control**
