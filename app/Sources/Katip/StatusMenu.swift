@@ -253,7 +253,8 @@ private final class StatusMenuView: NSView {
     private var hovered: String?
     private var anim: [String: CGFloat] = [:]
     private var time: CFTimeInterval = 0
-    private var smoothedLevel: CGFloat = 0
+    /// Canlı logo — kart ve menü çubuğu ikonuyla aynı uyarlanır ölçer.
+    private var meter = LevelMeter()
     private var hits: [(rect: NSRect, row: Row)] = []
     private var tracking: NSTrackingArea?
     private var symbolCache: [String: NSImage] = [:]
@@ -301,7 +302,7 @@ private final class StatusMenuView: NSView {
     func snapshotSetup(expanded: String?, time: CFTimeInterval) {
         self.expanded = expanded
         self.time = time
-        smoothedLevel = min(1, level() * 6)   // step()'teki ölçekle aynı
+        for _ in 0..<40 { meter.step(level: level(), dt: 1.0 / 60) }   // ölçeri oturt
         if let expanded { anim["g:" + expanded] = 1 }
     }
 
@@ -326,8 +327,7 @@ private final class StatusMenuView: NSView {
 
     func step(_ dt: CFTimeInterval) {
         time += dt
-        let raw = min(1, level() * 6)
-        smoothedLevel += (raw - smoothedLevel) * 0.3
+        meter.step(level: level(), dt: CGFloat(dt))
 
         func ease(_ key: String, to target: CGFloat, rate: CGFloat) {
             let current = anim[key] ?? target
@@ -485,7 +485,7 @@ private final class StatusMenuView: NSView {
             var h = bar.h
             if live != nil {
                 let wave = 0.6 + 0.4 * sin(time * 9 - Double(index) * 1.9)
-                let amp = reduceMotion ? 0.7 : max(0.25, smoothedLevel)
+                let amp = reduceMotion ? 0.7 : meter.punch   // sessizlikte çubuklar alçak ve durgun
                 h = max(2.4, bar.h * (0.3 + 0.7 * amp * CGFloat(wave)))
             }
             NSBezierPath(roundedRect: NSRect(x: origin.x + bar.x, y: origin.y + 9 - h / 2, width: 2.4, height: h),

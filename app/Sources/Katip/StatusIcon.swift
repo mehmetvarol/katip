@@ -23,8 +23,9 @@ enum StatusIcon {
 
             let body = NSBezierPath(roundedRect: NSRect(x: 6, y: 1.8, width: 4, height: 8.2),
                                     xRadius: 2, yRadius: 2)
-            // Tamamen boşken bile bir parmak dolu kalsın — "açık" olduğu belli olsun.
-            let fill = max(0.18, min(1, level))
+            // Sessizlikte BOŞ: gerçekte ses yokken sahte dolum göstermek yalan
+            // olur. "Açık" olduğunu zaten kırmızı/turuncu çizgi söylüyor.
+            let fill = max(0, min(1, level))
             NSGraphicsContext.saveGraphicsState()
             body.addClip()
             NSRect(x: 6, y: 1.8 + 8.2 * (1 - fill), width: 4, height: 8.2 * fill).fill()

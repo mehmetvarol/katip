@@ -63,7 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let controller = DictationController()
     private let hotkey = HotkeyMonitor()
     private var animationTimer: Timer?
-    private var smoothedLevel: CGFloat = 0
+    /// İkonun dolumu — yüzen kartın dalgasıyla AYNI uyarlanır ölçer.
+    private var iconMeter = LevelMeter()
+    private var lastIconTick = CACurrentMediaTime()
     private var hud: HUDPanel?
     private var wasShown = false
 
@@ -280,7 +282,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                          quiet.count, avg(quiet), quiet.max() ?? 0))
             print(String(format: "konuşma   (%d tampon): ort %.2f · en yüksek %.2f",
                          loud.count, avg(loud), loud.max() ?? 0))
-            let ok = avg(quiet) < 0.08 && avg(loud) > 0.30
+
+            // Menü çubuğu ikonunun gövde dolumu: aynı LevelMeter, uygulamadaki
+            // gibi 30 Hz tikle (bir tampon ≈ 85 ms ≈ 3 tik).
+            var meter = LevelMeter()
+            let fills: [CGFloat] = bars.map { bar in
+                for _ in 0..<3 { meter.step(level: bar.level, dt: 0.085 / 3) }
+                return meter.punch
+            }
+            let quietFill = bars.indices
+                .filter { i in i >= 6 && (max(0, i - 6)...i).allSatisfy { bars[$0].level <= 0.03 } }
+                .map { fills[$0] }
+            let loudFill = bars.indices.filter { bars[$0].level > 0.03 }.map { fills[$0] }
+            let sortedLoud = loudFill.sorted()
+            let p50 = sortedLoud.isEmpty ? 0 : sortedLoud[sortedLoud.count / 2]
+            print(String(format: "\nikon dolumu — sessizlik: ort %.2f · konuşma: ort %.2f · p50 %.2f · en yüksek %.2f",
+                         avg(quietFill), avg(loudFill), p50, loudFill.max() ?? 0))
+
+            let ok = avg(quiet) < 0.08 && avg(loud) > 0.30 && avg(quietFill) < 0.05
             print(ok ? "\n✔ sessizlik düz, konuşma belirgin" : "\n✗ ayrım yetersiz")
             exit(ok ? 0 : 1)
         }
@@ -1517,6 +1536,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.contentTintColor = nil
         switch state {
         case .recording, .locked:
+            lastIconTick = CACurrentMediaTime()
             startAnimation()   // tick() gövdeyi gerçek ses seviyesiyle dolduruyor
             button.image = StatusIcon.recording(level: 0, color: state == .locked ? .systemOrange : .systemRed)
         case .transcribing:
@@ -1553,7 +1573,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopAnimation() {
         animationTimer?.invalidate()
         animationTimer = nil
-        smoothedLevel = 0
+        iconMeter.reset()
     }
 
     /// Hem yüzen kartın dalgasını hem menü çubuğu ikonunun karelerini besler.
@@ -1562,11 +1582,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch controller.state {
         case .recording, .locked:
-            // Ham seviye çok zıplıyor; yumuşat ve konuşma aralığına göre yükselt.
-            let raw = min(1, CGFloat(controller.inputLevel) * 6)
-            smoothedLevel += (raw - smoothedLevel) * 0.35
+            // Uyarlanır: normal konuşma gövdeyi neredeyse doldurur, sessizlikte
+            // boş kalır (bkz. LevelMeter). Eskiden sabit ×6 kazançtı — sessiz
+            // odada da kısık konuşmada da gövde neredeyse boş görünüyordu.
+            let now = CACurrentMediaTime()
+            iconMeter.step(level: CGFloat(controller.inputLevel), dt: CGFloat(min(0.1, now - lastIconTick)))
+            lastIconTick = now
             statusItem.button?.image = StatusIcon.recording(
-                level: smoothedLevel, color: controller.state == .locked ? .systemOrange : .systemRed)
+                level: iconMeter.punch, color: controller.state == .locked ? .systemOrange : .systemRed)
         case .transcribing:
             statusItem.button?.image = StatusIcon.transcribing(time: CACurrentMediaTime())
         default:

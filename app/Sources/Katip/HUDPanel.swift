@@ -564,7 +564,6 @@ private final class CardView: NSView, NSViewToolTipOwner {
     private var dragOrigin: NSPoint?
 
     /// Yumuşatılmış canlı ses enerjisi (0...1).
-    private var energy: CGFloat = 0
 
     /// Hedef yüksekliği hesaplayıp mevcut değerleri ona doğru yumuşatır.
     /// `x` çubuğun 0...1 aralığındaki konumu.
@@ -765,37 +764,12 @@ private final class CardView: NSView, NSViewToolTipOwner {
         switch state {
         case .recording, .locked:
             isSettled = false
-            // Ataklı zarf: sese HIZLI yüksel, yavaş in. Simetrik yumuşatma
-            // konuşmanın vuruşunu ezip animasyonu cansız gösteriyordu.
-            // Zaman sabitleri saniye: yükselişte 20 ms, inişte 110 ms.
-            // UYARLANIR kazanç. Sabit kazanç çalışmıyor çünkü oturumlar
-            // arasında 3 KAT fark var — gerçek kayıtlardan ölçüldü (tampon
-            // başına tepe, konuşma anları):
-            //
-            //     kısık oturum   p50 0.045   p90 0.067   max 0.095
-            //     yüksek oturum  p50 0.143   p90 0.235   max 0.438
-            //
-            // Sabit 2.5 kazançla kısık oturum kapının hemen üstünde kalıyor ve
-            // dalga konuşurken bile DÜMDÜZ görünüyordu (kullanıcı bildirdi).
-            // Referansı son saniyelerin tepesinden alıyoruz: mikrofon uzak da
-            // olsa yakın da olsa konuşma tam yüksekliğe çıkıyor.
-            let level = CGFloat(inputLevel)
-            loudest = max(level, loudest * exp(-Self.referenceDecay * dt))
-
-            // MUTLAK kapı — VAD'in konuşma eşiğiyle aynı. Uyarlanır kazancın
-            // tek riski sessizlikte gürültüyü şişirmek; bunu engelleyen bu.
-            let speaking = level > Self.speechFloor
-            let reference = max(loudest, Self.minimumReference)
-            let raw = speaking ? min(1, level / reference) : 0
-
-            let tau: CGFloat = raw > energy ? 0.020 : 0.110
-            energy += (raw - energy) * (1 - exp(-dt / tau))
+            // Uyarlanır kazanç + ataklı zarf + mutlak konuşma kapısı: bkz.
+            // LevelMeter (menü çubuğu ikonuyla ORTAK hesap).
+            meter.step(level: CGFloat(inputLevel), dt: dt)
             phase += Self.waveSpeed * dt
 
-            // Kapı zaten sessizliği hallediyor; buradaki eğri konuşmanın alt
-            // yarısını yukarı çekiyor (üs 1'in ALTINDA — 1.3 denendi ve gerçek
-            // kısık konuşmayı dümdüz bıraktığı render'da görüldü).
-            let punch = pow(energy, 0.7)
+            let punch = meter.punch
 
             shape { index, x in
                 // Ortada yüksek, uçlarda sönen siluet × soldan sağa akan dalga.
@@ -816,7 +790,7 @@ private final class CardView: NSView, NSViewToolTipOwner {
             }
 
         default:
-            energy = 0
+            meter.reset()
             // Sönme de zaman tabanlı: saniyede ~e^-9, eski 30 Hz'deki 0.74/kare
             // ile aynı his.
             let decay = exp(-9 * dt)
@@ -829,27 +803,13 @@ private final class CardView: NSView, NSViewToolTipOwner {
     }
 
     /// Dalganın akış hızı, radyan/saniye. Eski 30 Hz × 0.34 rad/kare ile aynı.
-    /// Referansın sönme hızı (1/sn). ~3 saniyede yarıya iner: konuşmanın
-    /// tepesini hatırlayacak kadar uzun, sesini alçalttığında uyum sağlayacak
-    /// kadar kısa.
-    private static let referenceDecay: CGFloat = 0.231
-
-    /// Referansın alt sınırı. Bu olmasaydı tamamen sessiz bir odada uyarlanır
-    /// kazanç mikrofon gürültüsünü tavana çıkarırdı.
-    private static let minimumReference: CGFloat = 0.05
-
-    /// Bunun altı konuşma sayılmaz — `SpeechSegmenter.speechPeak` ile aynı
-    /// değer. İki yer aynı eşiği kullanmalı: VAD'in "konuşma yok" dediği anda
-    /// dalganın kıpırdaması yalan olur.
-    private static let speechFloor: CGFloat = 0.03
-
     private static let waveSpeed: CGFloat = 0.34 * 30
     private static let pulseSpeed: CGFloat = 0.22 * 30
 
     private var inputLevel: Float = 0
 
-    /// Son saniyelerin en yüksek seviyesi — uyarlanır kazancın referansı.
-    private var loudest: CGFloat = 0
+    /// Uyarlanır seviye ölçer — menü çubuğu ikonuyla aynı hesap.
+    private var meter = LevelMeter()
 
     /// Sonda için: çubukların anlık yüksekliği (0-1).
     var currentLevels: [CGFloat] { levels }
