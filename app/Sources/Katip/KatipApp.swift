@@ -1,16 +1,59 @@
 import AppKit
 import AVFoundation
 import ServiceManagement
-import SwiftUI
 
+/// Giriş noktası — SwiftUI `App` DEĞİL, düz AppKit.
+///
+/// Önceden `struct KatipApp: App` + boş bir `Settings { EmptyView() }` sahnesi
+/// vardı, tek amacı SwiftUI yaşam döngüsünü kurmaktı. macOS 27'de bu sahne
+/// açılışta 900×450'lik boş bir "Katip Settings" penceresi olarak açılmaya
+/// başladı (kullanıcı ekran görüntüsüyle bildirdi, pencere listesinde de
+/// görüldü). Arayüzün tamamı zaten AppKit (NSStatusItem, paneller); SwiftUI
+/// sadece geçmiş penceresinin içinde `NSHostingController` ile kullanılıyor,
+/// onun için App yaşam döngüsü gerekmiyor.
 @main
-struct KatipApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+enum KatipMain {
+    /// `NSApplication.delegate` zayıf referans — delege burada canlı tutuluyor.
+    private static var delegate: AppDelegate?
 
-    var body: some Scene {
-        // LSUIElement=true olduğu için görünür pencere yok; bu sahne sadece
-        // SwiftUI yaşam döngüsünü kurar. Arayüz NSStatusItem üzerinden.
-        Settings { EmptyView() }
+    @MainActor
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        Self.delegate = delegate
+        app.delegate = delegate
+        app.mainMenu = makeMainMenu()
+        app.run()
+    }
+
+    /// SwiftUI App'in kendiliğinden verdiği ana menünün yerine. LSUIElement
+    /// olduğu için görünmüyor ama kısayolların kaynağı bu: geçmiş penceresinin
+    /// arama alanında ⌘C/⌘V/⌘A/⌘Z ve pencereyi ⌘W ile kapatmak ancak bu menü
+    /// öğeleri varsa çalışıyor.
+    @MainActor
+    private static func makeMainMenu() -> NSMenu {
+        let main = NSMenu()
+
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Pencereyi Kapat", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        appMenu.addItem(withTitle: "Katip'ten Çık", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let appItem = NSMenuItem()
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+
+        let edit = NSMenu(title: "Düzen")
+        edit.addItem(withTitle: "Geri Al", action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = edit.addItem(withTitle: "Yinele", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "Kes", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Kopyala", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Yapıştır", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Tümünü Seç", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let editItem = NSMenuItem()
+        editItem.submenu = edit
+        main.addItem(editItem)
+        return main
     }
 }
 
