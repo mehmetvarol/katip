@@ -536,6 +536,11 @@ final class DictationController {
 
     func setAutoLanguage() { applyLanguage(.auto) }
 
+    /// Genel sözlük ayarı — açık oturumdaki Transcriber'a da hemen yansır.
+    func setGlossaryEnabled(_ on: Bool) {
+        Task { await transcriber.setUseGlossary(on) }
+    }
+
     /// Bir dili işaretle/kaldır. Otomatik moddaysa önce oradan çıkarıp tek
     /// dille başlar. Son kalan dil kaldırılamaz — boş seçim anlamsız.
     func toggleLanguage(_ code: LanguageChoice) {

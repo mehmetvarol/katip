@@ -170,6 +170,10 @@ actor Transcriber {
 
     private var effectiveGlossary: Bool { sessionGlossaryOverride ?? useGlossary }
 
+    /// Menüden canlı değiştirme. `promptTokens` gerekiyorsa bir sonraki
+    /// çeviride tembel inşa ediliyor (bkz. `transcribe`).
+    func setUseGlossary(_ on: Bool) { useGlossary = on }
+
     func setGlossaryOverride(_ on: Bool?) { sessionGlossaryOverride = on }
 
     /// - Parameter context: Aynı diktenin ÖNCEKİ parçasından çıkan metin.

@@ -8,6 +8,11 @@ enum Permissions {
         AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
     }
 
+    /// Reddedilmişse sistem istemi bir daha çıkmaz — tek yol Ayarlar.
+    static var isMicrophoneDenied: Bool {
+        AVCaptureDevice.authorizationStatus(for: .audio) == .denied
+    }
+
     static var hasAccessibility: Bool {
         AXIsProcessTrusted()
     }

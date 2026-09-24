@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let controller = DictationController()
     private let hotkey = HotkeyMonitor()
     private var animationTimer: Timer?
+    private var smoothedLevel: CGFloat = 0
     private var hud: HUDPanel?
     private var wasShown = false
 
@@ -486,6 +487,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Menü çubuğu menüsünü ve ikonlarını ekransız PNG'ye çizer — tasarımla
+        // karşılaştırmak için (`Katip --rendermenu <dizin>`).
+        if CommandLine.arguments.contains("--rendermenu") {
+            let dir = CommandLine.arguments.last ?? "/tmp"
+            let base = statusMenuElements()
+            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+            func with(_ status: StatusMenu.Status, _ hint: StatusMenu.Hint,
+                      progress: Double? = nil) -> [StatusMenu.Element] {
+                var elements = base
+                elements[0] = .header(.init(version: version, status: status, hint: hint, progress: progress))
+                return elements
+            }
+            StatusMenu.renderSample(with(.ready, .idle("⌥")), to: dir + "/menu-ready.png")
+            StatusMenu.renderSample(with(.ready, .idle("⌥")), expanded: "edit", to: dir + "/menu-edit.png")
+            StatusMenu.renderSample(with(.ready, .idle("⌥")), expanded: "lang", to: dir + "/menu-lang.png")
+            StatusMenu.renderSample(with(.ready, .idle("⌥")), expanded: "perms", to: dir + "/menu-perms.png")
+            StatusMenu.renderSample(with(.recording, .recording("⌥")), level: 0.12, to: dir + "/menu-recording.png")
+            StatusMenu.renderSample(with(.transcribing, .none), to: dir + "/menu-transcribing.png")
+            StatusMenu.renderSample(with(.downloading(0.42), .text("İlk açılışta bir kez · ~1.6 GB"), progress: 0.42),
+                                    to: dir + "/menu-download.png")
+            // İkonlar 8x büyütülmüş; template olanlar açık zeminde (sistem onları siyaha boyar).
+            func saveIcon(_ image: NSImage, _ name: String, dark: Bool) {
+                let px = 18 * 8
+                guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: px, pixelsHigh: px,
+                                                 bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                                                 isPlanar: false, colorSpaceName: .deviceRGB,
+                                                 bytesPerRow: 0, bitsPerPixel: 0) else { return }
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+                (dark ? NSColor(white: 0.12, alpha: 1) : NSColor(white: 0.92, alpha: 1)).setFill()
+                NSRect(x: 0, y: 0, width: px, height: px).fill()
+                image.draw(in: NSRect(x: 0, y: 0, width: px, height: px))
+                NSGraphicsContext.restoreGraphicsState()
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir + "/" + name))
+            }
+            saveIcon(StatusIcon.recording(level: 0.2, color: .systemRed), "icon-rec-low.png", dark: true)
+            saveIcon(StatusIcon.recording(level: 0.8, color: .systemRed), "icon-rec-high.png", dark: true)
+            saveIcon(StatusIcon.recording(level: 0.5, color: .systemOrange), "icon-locked.png", dark: true)
+            saveIcon(StatusIcon.transcribing(time: 0.1), "icon-trans-a.png", dark: false)
+            saveIcon(StatusIcon.transcribing(time: 0.4), "icon-trans-b.png", dark: false)
+            saveIcon(StatusIcon.downloading(progress: 0.42), "icon-download.png", dark: false)
+            print("render edildi: \(dir)")
+            exit(0)
+        }
+
         if CommandLine.arguments.contains("--rendercard") {
             let dir = CommandLine.arguments.last ?? "/tmp"
             let flat = [CGFloat](repeating: 0.05, count: 16)
@@ -576,156 +622,229 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if isRightClick {
             showMenu()
         } else {
+            // Native menü gibi: menü açıkken ikona tıklamak önce onu kapatır.
+            statusMenu?.dismiss()
             controller.toggle()
         }
     }
 
+    // MARK: - Menü çubuğu menüsü
+
+    /// Native NSMenu yerine kendi koyu panelimiz (bkz. StatusMenu.swift).
+    private var statusMenu: StatusMenu?
+
     private func showMenu() {
-        let menu = NSMenu()
+        if let menu = statusMenu { menu.dismiss(); return }
+        guard let button = statusItem.button, let window = button.window else { return }
+        let anchor = window.convertToScreen(button.convert(button.bounds, to: nil))
 
-        if let warning = installLocationWarning {
-            let item = NSMenuItem(title: warning, action: #selector(revealForInstallFix),
-                                  keyEquivalent: "")
-            item.target = self
-            menu.addItem(item)
-            menu.addItem(.separator())
+        let menu = StatusMenu(builder: { [weak self] in self?.statusMenuElements() ?? [] },
+                              level: { [weak self] in CGFloat(self?.controller.inputLevel ?? 0) })
+        menu.anchorWindow = window
+        menu.onClose = { [weak self] in
+            self?.statusItem.button?.highlight(false)
+            self?.statusMenu = nil
+        }
+        button.highlight(true)
+        statusMenu = menu
+        menu.show(below: anchor)
+    }
+
+    private func statusMenuElements() -> [StatusMenu.Element] {
+        typealias Row = StatusMenu.Row
+        let state = controller.state
+        let permissions = permissionRows()
+        var items: [StatusMenu.Element] = [.header(menuHeader(for: state, missing: permissions.missing))]
+
+        if installLocationWarning != nil {
+            items += [.separator, .row(Row(
+                id: "install", symbol: "exclamationmark.triangle", title: "Uygulamalar'a taşı",
+                caption: "Yoksa izinler her açılışta sıfırlanır", accessory: .link("Göster"),
+                tone: .warning, action: { [weak self] in self?.revealForInstallFix() }))]
         }
 
-        let status = NSMenuItem(title: controller.state.label, action: nil, keyEquivalent: "")
-        status.isEnabled = false
-        menu.addItem(status)
-        menu.addItem(.separator())
+        // İzin sorunu varsa en üste çıkıyor — asıl yapılması gereken iş o.
+        if permissions.missing > 0 {
+            items += [.separator, .section("İzinler")] + permissions.rows.map { .row($0) } + [.row(restartRow())]
+        }
 
+        items.append(.separator)
         if !controller.lastTranscript.isEmpty {
-            let preview = String(controller.lastTranscript.prefix(50))
-            let item = NSMenuItem(title: "Son metni kopyala: \(preview)…",
-                                  action: #selector(copyLast), keyEquivalent: "")
-            item.target = self
-            menu.addItem(item)
+            let preview = controller.lastTranscript.replacingOccurrences(of: "\n", with: " ")
+            items.append(.row(Row(id: "last", symbol: "text.alignleft", title: preview,
+                                  accessory: .hoverSymbol("doc.on.doc"), tone: .soft,
+                                  action: { [weak self] in self?.copyLast() })))
+        }
+        items.append(.row(Row(id: "history", symbol: "clock", title: "Geçmiş", accessory: .shortcut("⌘H"),
+                              action: { [weak self] in self?.showHistory() })))
+
+        // Dikte
+        items += [.separator, .section("Dikte"),
+                  .row(Row(id: "lang", symbol: "globe", title: "Dil",
+                           accessory: .disclosure(languageValue()), expands: "lang")),
+                  .group("lang", languageRows()),
+                  .row(Row(id: "hotkey", symbol: "option", title: "Kısayol",
+                           accessory: .disclosure(Self.hotkeyValue(HotkeyChoice.current)), expands: "hotkey")),
+                  .group("hotkey", hotkeyRows()),
+                  .row(Row(id: "glossary", symbol: "book", title: "Sözlük yönlendirmesi",
+                           caption: "Terimler daha doğru, ~0.8 sn yavaşlatır",
+                           accessory: .toggle(Transcriber.glossaryEnabled), closes: false,
+                           action: { [weak self] in self?.toggleGlossary() })),
+                  .row(Row(id: "edit", symbol: "pencil", title: "Düzenle", accessory: .disclosure("5 dosya"),
+                           expands: "edit")),
+                  .group("edit", [
+                    Row(id: "e-glossary", symbol: "book", title: "Sözlük",
+                        action: { [weak self] in self?.openGlossary() }),
+                    Row(id: "e-replace", symbol: "arrow.left.arrow.right", title: "Düzeltme tablosu",
+                        action: { [weak self] in self?.openReplacements() }),
+                    Row(id: "e-apps", symbol: "square.grid.2x2", title: "Uygulama kuralları",
+                        action: { [weak self] in self?.openAppProfiles() }),
+                    Row(id: "e-snippets", symbol: "chevron.left.forwardslash.chevron.right", title: "Metin kısayolları",
+                        action: { [weak self] in self?.openSnippets() }),
+                    Row(id: "e-learn", symbol: "folder", title: "Projelerimden terim öğren",
+                        action: { [weak self] in self?.learnFromProjects() }),
+                  ])]
+
+        // Görünüm
+        items += [.separator, .section("Görünüm"),
+                  .row(Row(id: "card", symbol: "capsule", title: "Yüzen kart",
+                           accessory: .toggle(HUDPanel.isEnabled), closes: false,
+                           action: { [weak self] in self?.toggleHUD() })),
+                  // Kapalı biçim bilerek neredeyse görünmez; kaybolduğunda geri çağıracak bir yol.
+                  .row(Row(id: "recenter", symbol: "scope", title: "Kartı ortala",
+                           tone: HUDPanel.isEnabled ? .normal : .dim,
+                           action: HUDPanel.isEnabled ? { [weak self] in self?.recenterHUD() } : nil)),
+                  .row(Row(id: "login", symbol: "power", title: "Girişte başlat",
+                           caption: LoginItem.needsApproval ? "Ayarlar'dan onay bekliyor" : nil,
+                           accessory: .toggle(LoginItem.isEnabled), closes: false,
+                           action: { [weak self] in self?.toggleLoginItem() }))]
+
+        // Her şey yolundaysa izinler tek satır; açınca ayrıntı + yeniden başlat.
+        if permissions.missing == 0 {
+            items += [.separator,
+                      .row(Row(id: "perms", symbol: "checkmark.shield", title: "İzinler",
+                               accessory: .badges(["mic", "accessibility", "keyboard"]), expands: "perms")),
+                      .group("perms", permissions.rows + [restartRow()])]
         }
 
-        let history = NSMenuItem(title: "Geçmiş…", action: #selector(showHistory),
-                                 keyEquivalent: "h")
-        history.target = self
-        menu.addItem(history)
-        menu.addItem(.separator())
+        items += [.separator, .row(Row(id: "quit", symbol: "rectangle.portrait.and.arrow.right", title: "Çık",
+                                       accessory: .shortcut("⌘Q"), action: { NSApp.terminate(nil) }))]
+        return items
+    }
 
-        let login = NSMenuItem(title: LoginItem.needsApproval
-                               ? "Girişte başlat (Ayarlar'dan onayla)"
-                               : "Girişte başlat",
-                               action: #selector(toggleLoginItem), keyEquivalent: "")
-        login.target = self
-        login.state = LoginItem.isEnabled ? .on : .off
-        menu.addItem(login)
-
-        let hudItem = NSMenuItem(title: "Yüzen kart", action: #selector(toggleHUD),
-                                 keyEquivalent: "")
-        hudItem.target = self
-        hudItem.state = HUDPanel.isEnabled ? .on : .off
-        menu.addItem(hudItem)
-
-        // Kapalı biçim bilerek neredeyse görünmez; kaybolduğunda geri çağıracak
-        // bir yol olmalı.
-        let findItem = NSMenuItem(title: "Kartı ekranın ortasına al",
-                                  action: #selector(recenterHUD), keyEquivalent: "")
-        findItem.target = self
-        findItem.isEnabled = HUDPanel.isEnabled
-        menu.addItem(findItem)
-        menu.addItem(.separator())
-
-        let languageItem = NSMenuItem(title: "Dikte Dili (\(controller.languageLabel))", action: nil, keyEquivalent: "")
-        languageItem.submenu = buildLanguageMenu()
-        menu.addItem(languageItem)
-
-        let hotkeyItem = NSMenuItem(title: "Kısayol tuşu", action: nil, keyEquivalent: "")
-        let hotkeyMenu = NSMenu()
-        for choice in HotkeyChoice.allCases {
-            let entry = NSMenuItem(title: choice.title, action: #selector(pickHotkey(_:)),
-                                   keyEquivalent: "")
-            entry.target = self
-            entry.representedObject = choice.rawValue
-            entry.state = (choice == HotkeyChoice.current) ? .on : .off
-            hotkeyMenu.addItem(entry)
+    private func menuHeader(for state: DictationController.State, missing: Int) -> StatusMenu.Header {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        let glyph = HotkeyChoice.current.glyph
+        switch state {
+        case .idle:
+            return .init(version: version, status: missing > 0 ? .permissions(missing) : .ready,
+                         hint: glyph.isEmpty ? .text("Kısayol kapalı — dikte için ikona tıkla") : .idle(glyph))
+        case .recording:
+            return .init(version: version, status: .recording,
+                         hint: glyph.isEmpty ? .text("Bitirmek için ikona tıkla") : .recording(glyph))
+        case .locked:
+            return .init(version: version, status: .locked, hint: glyph.isEmpty ? .none : .locked(glyph))
+        case .transcribing:
+            return .init(version: version, status: .transcribing, hint: .none)
+        case .loadingModel(let progress):
+            if let progress, progress > 0, progress < 1 {
+                return .init(version: version, status: .downloading(progress),
+                             hint: .text("İlk açılışta bir kez · ~1.6 GB"), progress: progress)
+            }
+            return .init(version: version, status: .loading, hint: .none)
+        case .error(let message):
+            return .init(version: version, status: .error, hint: .text(message))
         }
-        hotkeyItem.submenu = hotkeyMenu
-        menu.addItem(hotkeyItem)
+    }
 
-        let howto = NSMenuItem(title: "   basılı tut → konuş · çift bas → kilitle",
-                               action: nil, keyEquivalent: "")
-        howto.isEnabled = false
-        menu.addItem(howto)
-        menu.addItem(.separator())
+    /// Üç izin satırı + kaç tanesinin eksik olduğu. "Reddedilmiş" ile "henüz
+    /// sorulmadı" ayrı gösteriliyor: reddedilmişse sistem bir daha sormaz,
+    /// tek yol Ayarlar (bkz. Permissions.isInputMonitoringDenied).
+    private func permissionRows() -> (rows: [StatusMenu.Row], missing: Int) {
+        typealias Row = StatusMenu.Row
+        var rows: [Row] = []
+        var missing = 0
 
-        let toggle = NSMenuItem(title: "Sözlük yönlendirmesi (~2 sn yavaşlatır)",
-                                action: #selector(toggleGlossary), keyEquivalent: "")
-        toggle.target = self
-        toggle.state = Transcriber.glossaryEnabled ? .on : .off
-        menu.addItem(toggle)
-
-        let glossary = NSMenuItem(title: "Sözlüğü düzenle…",
-                                  action: #selector(openGlossary), keyEquivalent: "")
-        glossary.target = self
-        menu.addItem(glossary)
-
-        let replacements = NSMenuItem(title: "Düzeltme tablosunu düzenle…",
-                                      action: #selector(openReplacements), keyEquivalent: "")
-        replacements.target = self
-        menu.addItem(replacements)
-
-        let appProfiles = NSMenuItem(title: "Uygulama kurallarını düzenle…",
-                                     action: #selector(openAppProfiles), keyEquivalent: "")
-        appProfiles.target = self
-        menu.addItem(appProfiles)
-
-        let snippets = NSMenuItem(title: "Metin kısayollarını düzenle…",
-                                  action: #selector(openSnippets), keyEquivalent: "")
-        snippets.target = self
-        menu.addItem(snippets)
-
-        let learn = NSMenuItem(title: "Projelerimden terim öğren…",
-                               action: #selector(learnFromProjects), keyEquivalent: "")
-        learn.target = self
-        menu.addItem(learn)
-
-        menu.addItem(.separator())
-
-        let accessibility = NSMenuItem(
-            title: Permissions.hasAccessibility ? "✔ Erişilebilirlik izni var"
-                                                : "⚠️ Erişilebilirlik izni ver… (metin yazma)",
-            action: #selector(fixAccessibility), keyEquivalent: "")
-        accessibility.target = self
-        menu.addItem(accessibility)
-
-        let listenTitle: String
-        if Permissions.hasInputMonitoring {
-            listenTitle = "✔ Giriş İzleme izni var"
-        } else if Permissions.isInputMonitoringDenied {
-            // "izin ver…" YAZMIYORUZ — tıklamak hiçbir sistem istemi açmaz,
-            // kullanıcı "tıkladım, hiçbir şey olmadı" deneyimi yaşardı.
-            listenTitle = "⛔️ Giriş İzleme REDDEDİLMİŞ — Ayarlar'dan elle aç"
+        if Permissions.hasMicrophone {
+            rows.append(Row(id: "p-mic", symbol: "mic", title: "Mikrofon", accessory: .pill("Var", .systemGreen)))
         } else {
-            listenTitle = "⚠️ Giriş İzleme izni ver… (kısayol tuşu)"
+            missing += 1
+            let denied = Permissions.isMicrophoneDenied
+            rows.append(Row(id: "p-mic", symbol: denied ? "nosign" : "mic",
+                            title: denied ? "Mikrofon reddedildi" : "Mikrofon",
+                            caption: denied ? "Sistem bir daha sormaz — Ayarlar'dan aç" : "Sesini duymak için",
+                            accessory: .link(denied ? "Ayarlar" : "İzin ver"), tone: denied ? .danger : .warning,
+                            action: { Permissions.openSettings(.microphone) }))
         }
-        let listen = NSMenuItem(title: listenTitle, action: #selector(fixInputMonitoring), keyEquivalent: "")
-        listen.target = self
-        menu.addItem(listen)
 
+        if Permissions.hasAccessibility {
+            rows.append(Row(id: "p-ax", symbol: "accessibility", title: "Erişilebilirlik",
+                            accessory: .pill("Var", .systemGreen)))
+        } else {
+            missing += 1
+            rows.append(Row(id: "p-ax", symbol: "accessibility", title: "Erişilebilirlik",
+                            caption: "Metni imlece yazmak için", accessory: .link("İzin ver"), tone: .warning,
+                            action: { [weak self] in self?.fixAccessibility() }))
+        }
+
+        if Permissions.hasInputMonitoring {
+            rows.append(Row(id: "p-input", symbol: "keyboard", title: "Giriş İzleme",
+                            accessory: .pill("Var", .systemGreen)))
+        } else {
+            missing += 1
+            let denied = Permissions.isInputMonitoringDenied
+            rows.append(Row(id: "p-input", symbol: denied ? "nosign" : "keyboard",
+                            title: denied ? "Giriş İzleme reddedildi" : "Giriş İzleme",
+                            caption: denied ? "Sistem bir daha sormaz — Ayarlar'dan aç" : "Kısayol tuşu için",
+                            accessory: .link(denied ? "Ayarlar" : "İzin ver"), tone: denied ? .danger : .warning,
+                            action: { [weak self] in self?.fixInputMonitoring() }))
+        }
+        return (rows, missing)
+    }
+
+    private func restartRow() -> StatusMenu.Row {
         // İzin verildikten sonra süreç yeniden başlamadan geçerli olmayabilir
-        // (Erişilebilirlik durumu süreç başına önbelleklenir). Kullanıcı
-        // Terminal'e "tccutil reset" yazmayı bilmiyor — tek tıkla çözüm.
-        let relaunch = NSMenuItem(title: "🔄 Katip'i yeniden başlat (izin verdikten sonra gerekir)",
-                                  action: #selector(relaunchApp), keyEquivalent: "")
-        relaunch.target = self
-        menu.addItem(relaunch)
+        // (Erişilebilirlik durumu süreç başına önbelleklenir).
+        StatusMenu.Row(id: "restart", symbol: "arrow.clockwise", title: "Katip'i yeniden başlat",
+                       caption: "İzin verdikten sonra gerekir", tone: .primary,
+                       action: { [weak self] in self?.relaunchApp() })
+    }
 
-        menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Çık", action: #selector(NSApplication.terminate(_:)),
-                              keyEquivalent: "q")
-        menu.addItem(quit)
+    private func languageValue() -> String {
+        if controller.isAutoLanguage { return "Otomatik" }
+        let picked = DictationController.LanguageChoice.allCases.filter { controller.isLanguageSelected($0) }
+        switch picked.count {
+        case 0: return "Otomatik"
+        case 1: return picked[0].title
+        case 2: return picked.map(\.title).joined(separator: ", ")
+        default: return "\(picked.count) dil"
+        }
+    }
 
-        statusItem.menu = menu
-        statusItem.button?.performClick(nil)
-        statusItem.menu = nil  // menü kalıcı olmasın, sol tık yine doğrudan kayıt açsın
+    /// Menüyü kapatmıyor — checklist gibi, istediğin kadar dil işaretle.
+    private func languageRows() -> [StatusMenu.Row] {
+        var rows = [StatusMenu.Row(id: "l-auto", symbol: nil, title: "Otomatik algıla",
+                                   accessory: .check(controller.isAutoLanguage), closes: false,
+                                   action: { [weak self] in self?.controller.setAutoLanguage() })]
+        for choice in DictationController.LanguageChoice.allCases {
+            rows.append(StatusMenu.Row(id: "l-" + choice.rawValue, symbol: nil, title: choice.title,
+                                       accessory: .check(controller.isLanguageSelected(choice)), closes: false,
+                                       action: { [weak self] in self?.controller.toggleLanguage(choice) }))
+        }
+        return rows
+    }
+
+    private func hotkeyRows() -> [StatusMenu.Row] {
+        HotkeyChoice.allCases.map { choice in
+            StatusMenu.Row(id: "k-" + choice.rawValue, symbol: nil, title: Self.hotkeyValue(choice),
+                           accessory: .check(choice == HotkeyChoice.current), closes: false,
+                           action: { [weak self] in self?.pickHotkey(choice) })
+        }
+    }
+
+    /// "Sağ Option (⌥)" → "Sağ Option ⌥" — tasarımdaki yazım.
+    private static func hotkeyValue(_ choice: HotkeyChoice) -> String {
+        choice.title.replacingOccurrences(of: "(", with: "").replacingOccurrences(of: ")", with: "")
     }
 
     @objc private func showHistory() {
@@ -823,57 +942,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         languageMenu?.update(rows: languageMenuRows())
     }
 
-    /// Durum çubuğu menüsü için — orası zaten native (hotkey/sözlük de öyle),
-    /// tutarlılık için burada da native kalıyor. Sadece kartın açılır paneli
-    /// özel çizim kullanıyor.
-    private func buildLanguageMenu() -> NSMenu {
-        let menu = NSMenu()
-        let auto = NSMenuItem(title: "Otomatik algıla", action: #selector(pickAutoLanguage), keyEquivalent: "")
-        auto.target = self
-        auto.state = controller.isAutoLanguage ? .on : .off
-        menu.addItem(auto)
-        menu.addItem(.separator())
-        for choice in DictationController.LanguageChoice.allCases {
-            let item = NSMenuItem(title: choice.title, action: #selector(toggleLanguageItem(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = choice.rawValue
-            item.state = controller.isLanguageSelected(choice) ? .on : .off
-            menu.addItem(item)
-        }
-        return menu
-    }
-
-    @objc private func pickAutoLanguage() {
-        controller.setAutoLanguage()
-        flash("Dikte dili: \(controller.languageLabel)")
-    }
-
-    @objc private func toggleLanguageItem(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let choice = DictationController.LanguageChoice(rawValue: raw) else { return }
-        controller.toggleLanguage(choice)
-        flash("Dikte dili: \(controller.languageLabel)")
-    }
-
     private func hideHUD() {
         hud?.orderOut(nil)
         hud = nil
     }
 
-    @objc private func pickHotkey(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let choice = HotkeyChoice(rawValue: raw) else { return }
+    private func pickHotkey(_ choice: HotkeyChoice) {
         HotkeyChoice.current = choice
         hotkey.start()   // yeni tuşla yeniden bağlan
         Trace.log("kısayol değiştirildi: \(choice.title)")
     }
 
+    /// Canlı: açık Transcriber'a hemen iletiliyor, yeniden başlatma gerekmiyor
+    /// (menüdeki bir anahtar "yeniden başlat" isteseydi bozuk hissettirirdi).
     @objc private func toggleGlossary() {
         Transcriber.glossaryEnabled.toggle()
-        Trace.log("sözlük yönlendirmesi: \(Transcriber.glossaryEnabled ? "açık" : "kapalı") — yeniden başlat")
-        flash(Transcriber.glossaryEnabled
-              ? "Sözlük açıldı (~2 sn yavaşlar) — yeniden başlat"
-              : "Sözlük kapatıldı — yeniden başlat")
+        controller.setGlossaryEnabled(Transcriber.glossaryEnabled)
+        Trace.log("sözlük yönlendirmesi: \(Transcriber.glossaryEnabled ? "açık" : "kapalı")")
     }
 
     @objc private func openGlossary() {
@@ -1385,35 +1470,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button else { return }
         button.toolTip = installLocationWarning ?? "Katip — \(state.label)"
 
+        // Menü çubuğu ikonu: her durum kendi hareketiyle (bkz. StatusIcon.swift).
+        button.contentTintColor = nil
         switch state {
         case .recording, .locked:
-            startAnimation()
-            // Kullanıcı akan dalga çubuklarını "ne olduğu belli olmuyor"
-            // diye eleştirdi — normal mikrofon ikonunun DOLU hâli
-            // (`mic.fill`, zaten `state.symbol`'de tanımlı) evrensel ve
-            // net: "şu an ses alıyor". Renk kırmızı/turuncu ile ayrıca
-            // vurgulanıyor.
-            let tint: NSColor = state == .locked ? .systemOrange : .systemRed
-            button.image = NSImage(systemSymbolName: state.symbol, accessibilityDescription: "Dinliyor")?
-                .withSymbolConfiguration(.init(paletteColors: [tint]))
-            button.image?.isTemplate = false
+            startAnimation()   // tick() gövdeyi gerçek ses seviyesiyle dolduruyor
+            button.image = StatusIcon.recording(level: 0, color: state == .locked ? .systemOrange : .systemRed)
         case .transcribing:
-            // Native NSProgressIndicator menü çubuğu ikon alanına doğru
-            // sığmıyordu ("oraya bir sığmıyor sanki") — kaldırıldı. Yüzen
-            // kart zaten dönen bir gösterge + "Yazıya çevriliyor…" metni
-            // gösteriyor, menü çubuğunda sabit bir simge yeterli.
-            stopAnimation()
-            button.contentTintColor = nil
-            button.image = icon(for: state)
-            button.image?.isTemplate = true
+            startAnimation()   // tick() çubukları akıtıyor
+            button.image = StatusIcon.transcribing(time: CACurrentMediaTime())
+        case .loadingModel(let progress?) where progress > 0 && progress < 1:
+            button.image = StatusIcon.downloading(progress: progress)
         default:
             // Kart açıkken animasyon döngüsü sürsün: dalgalar yumuşakça sönümlensin
             // ve durum metni canlı kalsın.
             if hud == nil { stopAnimation() }
-            button.contentTintColor = nil
             button.image = icon(for: state)
             button.image?.isTemplate = true
         }
+        statusMenu?.reload()
 
         if case .error(let message) = state { Trace.log("durum hatası: \(message)") }
     }
@@ -1435,18 +1510,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopAnimation() {
         animationTimer?.invalidate()
         animationTimer = nil
+        smoothedLevel = 0
     }
 
-    /// Menü çubuğu ikonu artık sabit (mikrofon dolu/waveform) — burada sadece
-    /// yüzen kartın dalga animasyonunu beslemek için tikleniyor.
+    /// Hem yüzen kartın dalgasını hem menü çubuğu ikonunun karelerini besler.
     private func tick() {
         hud?.update(state: controller.state, level: controller.inputLevel)
 
-        // Boşta kart sönümlenince döngüyü kes: menü çubuğu yardımcısı gün boyu
-        // açık duruyor, sürekli çizim pil yakar (%9 CPU ölçüldü).
         switch controller.state {
-        case .recording, .locked, .transcribing: break
+        case .recording, .locked:
+            // Ham seviye çok zıplıyor; yumuşat ve konuşma aralığına göre yükselt.
+            let raw = min(1, CGFloat(controller.inputLevel) * 6)
+            smoothedLevel += (raw - smoothedLevel) * 0.35
+            statusItem.button?.image = StatusIcon.recording(
+                level: smoothedLevel, color: controller.state == .locked ? .systemOrange : .systemRed)
+        case .transcribing:
+            statusItem.button?.image = StatusIcon.transcribing(time: CACurrentMediaTime())
         default:
+            // Boşta kart sönümlenince döngüyü kes: menü çubuğu yardımcısı gün boyu
+            // açık duruyor, sürekli çizim pil yakar (%9 CPU ölçüldü).
             if hud?.isSettled ?? true { stopAnimation() }
         }
     }
