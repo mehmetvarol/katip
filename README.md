@@ -26,7 +26,8 @@ karışık dil durumu için Whisper tabanlı bir motor kullanıyor.
 - 〰️ Masaüstünde yüzen kart: canlı ses dalgası, kenara yapışma
 - 🔒 Kilit modunda **akan çeviri**, tek seferde yazma
 - 📴 Bulut yok, abonelik yok, ses cihazdan çıkmıyor
-- ⚡ ~0.43× gerçek zaman (M1 Pro, Metal) — 5 sn konuşma ~2.2 sn'de yazıya döner
+- ⚡ Kısa ya da uzun, bir dikte ~2.5 sn'de yazıya döner (M1 Pro, Metal — 1.7 sn'lik
+  ve 9.5 sn'lik gerçek kayıtlarla ölçüldü)
 
 ## Kurulum
 
@@ -35,7 +36,9 @@ Katip **notarize edilmiş bir binary dağıtmıyor** — Apple Developer Program
 
 **İndir (en basit):**
 [Katip.zip'i indir](https://github.com/mehmetvarol/katip/releases/latest) →
-çıkar → `Katip.app`'i Uygulamalar klasörüne sürükle.
+çıkar → `Katip.app`'i Uygulamalar klasörüne sürükle. Unutup İndirilenler'den
+açarsan Katip kendini Uygulamalar'a kopyalayıp oradan yeniden açılır —
+başka bir yerden çalışırsa macOS izinleri her açılışta sıfırlıyor.
 
 **Homebrew ile:**
 ```bash
@@ -73,10 +76,19 @@ KATIP_SIGN_ID="Developer ID Application: Ad Soyad (TEAMID)" ./app/build.sh --run
 | İkona **sağ tık** | Menü (kısayol, sözlük, geçmiş, ayarlar) |
 
 Kısayol tuşu menüden seçilir (varsayılan **Sağ Option**): sağ tık → "Kısayol tuşu".
+Seçenekler: sol ya da sağ **Option**, **Command**, **Shift** ve **sol Control**
+(Apple klavyelerinde sağ Control tuşu yok).
 
 İlk çalıştırmada üç izin istenir — **Mikrofon**, **Erişilebilirlik** (metnin
 imlece yazılması için) ve **Giriş İzleme** (kısayol tuşu için), ayrıca ~1.6 GB
-model iner. Durumu izlemek için:
+model iner (menü çubuğu ikonu indirme yüzdesini gösterir).
+
+İzinleri verdikten sonra menüden **"🔄 Katip'i yeniden başlat"**ı seç — macOS
+izni çalışan uygulamaya ancak yeniden başlatınca yansıtıyor. Menüde bir izin
+**⛔️ REDDEDİLMİŞ** görünüyorsa sistem bir daha sormaz: Sistem Ayarları →
+Gizlilik ve Güvenlik'ten Katip'i elle aç (menüdeki satır oraya götürür).
+
+Durumu izlemek için:
 ```bash
 tail -f ~/Library/Application\ Support/Katip/katip.log
 ```
@@ -85,7 +97,8 @@ tail -f ~/Library/Application\ Support/Katip/katip.log
 
 Masaüstünde duran, şekil değiştiren bir gösterge — boşta ince bir çizgi,
 fareyle üstüne gelince iki düğmeye açılır (dil, mikrofon), konuşurken
-ses seviyesine tepki veren bir dalgayla genişler. Sürükleyip savurabilirsin —
+ses seviyesine tepki veren bir dalgayla genişler; kayıt bitince dönen bir
+gösterge ve "Yazıya çevriliyor…" yazar. Sürükleyip savurabilirsin —
 fizik tabanlı hareket kenara yapışır, ekran dışına asla tamamen çıkmaz.
 
 ## Diğer özellikler
@@ -97,8 +110,9 @@ fizik tabanlı hareket kenara yapışır, ekran dışına asla tamamen çıkmaz.
 - **Sözlük** — sık bozulan teknik terimler için Whisper'a ipucu (varsayılan
   açık, 10 terim); kendi terimlerini `glossary.txt`'e ekleyebilirsin
 - **Çoklu dil seçimi** — kartın küre ikonu birden fazla dili aynı anda
-  işaretlemene izin verir; Katip her dili ayrı ayrı dener ve en güvenilir
-  sonucu seçer
+  işaretlemene izin verir. İlk dil asıl dil: sonucu boş değilse ve yeterince
+  güvenliyse diğerleri hiç denenmez, böylece dikte yavaşlamaz; ilk dil boş ya da
+  kararsız kalırsa sıradaki dil devreye girer
 - **Uygulama-bazlı kurallar** — dikte dili ve sözlük, odaktaki uygulamaya göre
   otomatik değişir (ör. Cursor'da TR+EN sözlük açık, Slack'te sadece TR
   sözlük kapalı); `app-profiles.txt`'te düzenlenir
