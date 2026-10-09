@@ -1369,8 +1369,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         exit(0)
     }
 
-    /// `--learn` dizin verilmezse ve menüden tetiklenince taranan klasör.
-    static let defaultLearnDirectory = "~/Documents/Projeler"
+    /// `--learn` dizin verilmezse ve menüden tetiklenince taranan klasör:
+    /// projeler `~/Documents/Projeler`'de toplanmışsa orası, yoksa `~/Desktop`.
+    static var defaultLearnDirectory: String {
+        let projects = ("~/Documents/Projeler" as NSString).expandingTildeInPath
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: projects, isDirectory: &isDir) && isDir.boolValue
+            ? "~/Documents/Projeler" : "~/Desktop"
+    }
 
     /// Projelerden terim öğren, geçmişle karşılaştırıp kural öner.
     private func runLearn(directories: [String]) {
