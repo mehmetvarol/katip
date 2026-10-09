@@ -81,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let i = CommandLine.arguments.firstIndex(of: "--learn") {
             let dirs = Array(CommandLine.arguments.dropFirst(i + 1))
                 .filter { !$0.hasPrefix("--") }
-            runLearn(directories: dirs.isEmpty ? ["~/Desktop"] : dirs)
+            runLearn(directories: dirs.isEmpty ? [Self.defaultLearnDirectory] : dirs)
             return
         }
 
@@ -1164,7 +1164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let script = """
         tell application "Terminal"
             activate
-            do script "'\(binary)' --learn ~/Desktop; echo; echo 'Önerileri gözden geçir:'; open '\(Vocabulary.proposalsURL.path)' 2>/dev/null || true"
+            do script "'\(binary)' --learn \(Self.defaultLearnDirectory); echo; echo 'Önerileri gözden geçir:'; open '\(Vocabulary.proposalsURL.path)' 2>/dev/null || true"
         end tell
         """
         NSAppleScript(source: script)?.executeAndReturnError(nil)
@@ -1368,6 +1368,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         print(String(format: "  artık: %.1f sn", leftover))
         exit(0)
     }
+
+    /// `--learn` dizin verilmezse ve menüden tetiklenince taranan klasör.
+    static let defaultLearnDirectory = "~/Documents/Projeler"
 
     /// Projelerden terim öğren, geçmişle karşılaştırıp kural öner.
     private func runLearn(directories: [String]) {

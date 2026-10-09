@@ -152,7 +152,7 @@ fizik tabanlı hareket kenara yapışır, ekran dışına asla tamamen çıkmaz.
   sözlük kapalı); `app-profiles.txt`'te düzenlenir
 - **Metin kısayolları** — söylediğin bir ifade hazır bir metin bloğuna genişler
 - **Projelerinden terim öğrenme** — `package.json` bağımlılıklarını tarayıp
-  telaffuz kurallarını önerir (`Katip --learn ~/Desktop`)
+  telaffuz kurallarını önerir (varsayılan `~/Documents/Projeler`; başka klasör: `Katip --learn <klasör>`)
 - **Girişte başlat** (menü → Görünüm → Girişte başlat)
 
 Ayarlar düz metin dosyaları olarak `~/Library/Application Support/Katip/` altında
